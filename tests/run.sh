@@ -144,6 +144,20 @@ if [ "$rname" -ge 1 ] && [ "$raout" -ge 1 ] && [ "$rcarve" = yes ]; then
 	ok "scavenge (deleted name + a.out carved exactly)"
 else no "scavenge (name=$rname aout=$raout carve=$rcarve)"; fi
 
+# 10h. analysis bundle: df / quot / ncheck -s / du / labelit
+"$S5" mkfs -d rl02 "$T/an.dsk" >/dev/null 2>&1
+"$S5" put "$T/an.dsk" "$T/src" /f >/dev/null 2>&1
+"$S5" chmod "$T/an.dsk" 4755 /f >/dev/null 2>&1
+dfok=$("$S5" df "$T/an.dsk" 2>/dev/null | grep -c blocks)
+qok=$("$S5" quot "$T/an.dsk" 2>/dev/null | grep -c kbytes)
+sok=$("$S5" ncheck -s "$T/an.dsk" 2>/dev/null | grep -c '/f$')
+duok=$("$S5" du "$T/an.dsk" 2>/dev/null | grep -c ' /$')
+"$S5" labelit "$T/an.dsk" myvol >/dev/null 2>&1
+lok=$("$S5" labelit "$T/an.dsk" 2>/dev/null | grep -c myvol)
+if [ "$dfok" -ge 1 ] && [ "$qok" -ge 1 ] && [ "$sok" -eq 1 ] && [ "$duok" -ge 1 ] && [ "$lok" -ge 1 ] && fsck_clean "$T/an.dsk"; then
+	ok "analysis (df/quot/ncheck -s/du/labelit) + fsck clean"
+else no "analysis (df=$dfok quot=$qok ncheck=$sok du=$duok label=$lok)"; fi
+
 # 11. interactive shell drives the engine
 printf 'mkdir sub\ncd sub\nput %s g\nls\nquit\n' "$T/src" | "$S5" shell "$T/a.dsk" >/dev/null 2>&1
 if "$S5" cat "$T/a.dsk" /sub/g 2>/dev/null | grep -q fox && fsck_clean "$T/a.dsk"; then ok "shell session -> fsck clean"; else no "shell session -> fsck clean"; fi

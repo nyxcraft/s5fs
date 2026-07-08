@@ -26,6 +26,11 @@ bar the cross `as`/`cc` are held to.
     s5fs manifest  fingerprint an image (path/mode/owner/size/cksum per file)
     s5fs verify    diff an image against a manifest
     s5fs scavenge  find remnants of deleted files: names + carve (-x to extract)
+    s5fs ncheck    inode -> path (-s: setuid/setgid/device audit; -i N,N)
+    s5fs quot      blocks + files per owner
+    s5fs du        disk usage per directory subtree (-a for files too)
+    s5fs df        block + inode usage summary
+    s5fs labelit   read/set the volume label
     s5fs boot      install a primary bootstrap into block 0
     s5fs vhd       wrap/unwrap a fixed-VHD container (wrap/unwrap/info)
 
@@ -159,6 +164,7 @@ single/double/triple-indirect map (files of any size), and after edits
     src/cmd_fsdb.c   `fsdb`  -- the interactive debugger (raw inodes/blocks)
     src/cmd_manifest.c `manifest`/`verify` -- mtree-style fingerprint + diff
     src/cmd_scavenge.c `scavenge` -- deleted-name + signature-carve remnants
+    src/cmd_analysis.c `ncheck`/`quot`/`du`/`df`/`labelit` -- reporting tools
     src/fsutil.h     small presentation helpers (mode string, path resolve)
     src/cmd_fsck.c   `fsck`   subcommand -- an independent reader/checker.
     src/cmd_mount.c  `mount`/`umount` -- a thin FUSE front-end over s5fs_rw
@@ -492,6 +498,31 @@ come back intact, a deleted `a.out` start is carved byte-exact, and a multi-bloc
 text file is recovered block by block (each block is independently identifiable,
 though not necessarily reassembled in order); large binaries recover only their
 leading blocks.  So it's a forensic scavenger, not a guaranteed undelete.
+
+## Analysis tools
+
+The classic read-mostly reporting tools, over the fsread reader (block counts in
+`-B` filesystem blocks):
+
+    s5fs ncheck [-s] [-i N,N] image     inode -> path
+    s5fs quot   image                   blocks + files per owner
+    s5fs du     [-a] image [path]       disk usage per directory subtree
+    s5fs df     image                   block + inode usage summary
+    s5fs labelit image [name [pack]]    read/set the volume label
+
+`ncheck` maps inodes to paths; `-s` restricts to **setuid / setgid / device**
+files (a one-line security audit), and `-i N,N` finds where specific inodes live
+(e.g. both names of a hard link).  `quot` tallies KB and file count per uid;
+`du` prints cumulative blocks per directory (post-order, like `du`); `df`
+summarises block and inode use.  `labelit` reads or sets the volume name -- the
+System V `s_fname`/`s_fpack` on a SysV-flavoured image, else the V7 `s_fsmnt`.
+Example audit of the real 2.9 root:
+
+    $ s5fs ncheck -s root.dsk
+    setuid / setgid / device files:
+      263  -rwsr-xr-x  /bin/iostat
+        9  -rwsr-xr-x  /bin/su
+      ...
 
 ## Byte order
 

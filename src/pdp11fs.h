@@ -109,6 +109,8 @@
 #define P11_SB_SVDINFO	418	/* SysV: short[4] device info            */
 #define P11_SB_SVTFREE	426	/* SysV: daddr_t total free blocks       */
 #define P11_SB_SVTINODE	430	/* SysV: ino_t total free inodes         */
+#define P11_SB_SVFNAME	432	/* SysV: char[6] file-system name        */
+#define P11_SB_SVFPACK	438	/* SysV: char[6] pack name               */
 #define P11_SB_STATE	500	/* SysV: long fs state (clean marker)    */
 #define P11_SB_MAGIC	504	/* SysV: long 0xfd187e20                 */
 #define P11_SB_TYPE	508	/* SysV: long 1/2/3 = 512/1024/2048      */

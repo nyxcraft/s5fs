@@ -121,8 +121,9 @@ static uint32_t deleted_names(void)
 		nblk = ((uint32_t)in.size + R.bsize - 1) / R.bsize;
 		for (b = 0; b < nblk; b++) {
 			uint32_t e;
-			if (fsr_readfile(&R, &in, buf, R.bsize, (long)b * R.bsize) <= 0) continue;
-			for (e = 0; e < R.ndirect; e++) {
+			long got = fsr_readfile(&R, &in, buf, R.bsize, (long)b * R.bsize);
+			if (got <= 0) continue;
+			for (e = 0; e * P11_DIRENTSZ < (uint32_t)got; e++) {
 				uint8_t *d = buf + e * P11_DIRENTSZ;
 				char nm[P11_DIRSIZ + 1];
 				if (R.bo->get16(d) != 0) continue;	/* live entry */

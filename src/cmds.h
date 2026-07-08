@@ -21,6 +21,11 @@ int cmd_fsdb(int argc, char **argv);	/* interactive filesystem debugger */
 int cmd_manifest(int argc, char **argv);/* mtree-style fingerprint of an image */
 int cmd_verify(int argc, char **argv);	/* diff an image against a manifest    */
 int cmd_scavenge(int argc, char **argv);/* scavenge deleted-file remnants      */
+int cmd_ncheck(int argc, char **argv);	/* inode -> path (-s: setuid/dev audit) */
+int cmd_quot(int argc, char **argv);	/* blocks + files per owner            */
+int cmd_du(int argc, char **argv);	/* disk usage per directory subtree    */
+int cmd_df(int argc, char **argv);	/* block + inode usage summary         */
+int cmd_labelit(int argc, char **argv);	/* read/set the volume label           */
 int cmd_boot(int argc, char **argv);	/* install a boot block (block 0) */
 int cmd_vhd(int argc, char **argv);	/* wrap/unwrap a fixed-VHD container */
 

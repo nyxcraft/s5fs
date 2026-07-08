@@ -26,7 +26,7 @@
 static void usage(void)
 {
 	fprintf(stderr,
-	    "usage: s5fs mkfs [-B 512|1024] [-a pdp11|le|be] [-d device | -b blocks | -s sectors]\n"
+	    "usage: s5fs mkfs [-B 512|1024|2048] [-a pdp11|le|be] [-d device | -b blocks | -s sectors]\n"
 	    "                 [-P part | -o START:LEN] [-r release] [-m m] [-n n] [-t mtime] [-i ninode] image\n"
 	    "\n"
 	    "  -a arch  on-disk byte order: pdp11 (default), le (vax/x86), be (m68k)\n"
@@ -120,8 +120,8 @@ int cmd_mkfs(int argc, char **argv)
 
 	if (opts.bsize == 0)
 		opts.bsize = 1024;
-	if (opts.bsize != 512 && opts.bsize != 1024) {
-		fprintf(stderr, "s5fs mkfs: block size must be 512 or 1024\n");
+	if (!P11_BSIZE_OK(opts.bsize)) {
+		fprintf(stderr, "s5fs mkfs: block size must be 512, 1024, or 2048\n");
 		return 2;
 	}
 

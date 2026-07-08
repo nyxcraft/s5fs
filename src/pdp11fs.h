@@ -34,8 +34,13 @@
 #define P11_DINODESZ	64	/* sizeof on-disk struct dinode        */
 #define P11_MAXNADDR	13	/* di_addr slots in the 512-byte profile */
 #define P11_MAXFN	500	/* cap on the free-list interleave n   */
-#define P11_MAXBSIZE	1024	/* largest block size we support       */
+#define P11_MAXBSIZE	2048	/* largest block size we support       */
 #define P11_MAXNINDIR	(P11_MAXBSIZE / 4)	/* daddr_t per indirect block */
+
+/* Logical block sizes s5fs allows: 512 (V7), 1024 (2.x BSD UCB), 2048 (SysV
+ * Fs4b).  2048 is the family maximum -- the superblock's block-size code only
+ * defines up to Fs4b; bigger blocks are FFS, a different filesystem. */
+#define P11_BSIZE_OK(b)	((b) == 512 || (b) == 1024 || (b) == 2048)
 #define P11_MAXFSBLKS	(1UL << 24)	/* max blocks: di_addr is a 3-byte (24-bit)
 					 * block number, so a filesystem can hold at
 					 * most 2^24 blocks (16G @1K, 8G @512) */

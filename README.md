@@ -94,7 +94,7 @@ file's mtime.  Example:
 
 ### Interactive explorer
 
-    s5fs shell [-r] [-B 512|1024] [-A pdp11|le|be] image
+    s5fs shell [-r] [-B 512|1024|2048] [-A pdp11|le|be] image
 
 A small REPL with a current directory inside the image (read-write unless `-r`):
 
@@ -114,7 +114,7 @@ Commands: `ls [-l] [-a]`, `cd`, `pwd`, `cat`, `get`, `put`, `cp`, `mv`, `rm`,
 
 ## Mounting (FUSE)
 
-    s5fs mount [-B 512|1024] [-A pdp11|le|be] [-w] [-f] image mountpoint
+    s5fs mount [-B 512|1024|2048] [-A pdp11|le|be] [-w] [-f] image mountpoint
     s5fs umount mountpoint
 
 Mounts an image with FUSE so you can browse and copy files with normal tools.
@@ -172,11 +172,12 @@ shell -- asserting `fsck` is clean after every mutating flow.
 
 ## mkfs
 
-    s5fs mkfs [-B 512|1024] [-a pdp11|le|be] [-d device | -b blocks | -s sectors]
+    s5fs mkfs [-B 512|1024|2048] [-a pdp11|le|be] [-d device | -b blocks | -s sectors]
               [-r release] [-m m] [-n n] [-t mtime] [-i ninode] image
 
 `-B` is the filesystem block size (default 1024, the UCB_NKB config; 512 is the
-non-UCB / V7 config).  Size comes from a known device (`-d`, see `s5fs
+non-UCB / V7 config; 2048 is the System V `Fs4b` size for non-PDP targets).
+Size comes from a known device (`-d`, see `s5fs
 devices`), filesystem blocks (`-b`), or 512-byte SIMH sectors (`-s`).  `-m`/`-n`
 are the free-list interleave (default 5/10, as mkfs), `-t` pins the timestamp
 for a reproducible image, `-i` forces a minimum inode count.
@@ -192,7 +193,7 @@ note never blocks, since a kernel may carry a backported driver.
 
 ## mktree
 
-    s5fs mktree [-B 512|1024] [-a pdp11|le|be]
+    s5fs mktree [-B 512|1024|2048] [-a pdp11|le|be]
                 [-d device | -b blocks | -s sectors] [-t mtime] rootdir image
 
 Builds a *populated* image: creates a fresh filesystem sized for the device,
@@ -212,9 +213,9 @@ hard-link coalescing (each link currently becomes its own inode).
 
 ## tar
 
-    s5fs tar x [-B 512|1024] [-a pdp11|le|be]
+    s5fs tar x [-B 512|1024|2048] [-a pdp11|le|be]
                [-d device | -b blocks | -s sectors] [-t mtime] archive image   (extract)
-    s5fs tar c [-B 512|1024] [-A pdp11|le|be] image archive                     (create)
+    s5fs tar c [-B 512|1024|2048] [-A pdp11|le|be] image archive                     (create)
 
 `tar x` builds an image from a tar archive (ustar/GNU); `tar c` is the reverse,
 writing a tar archive from an image.  Metadata (mode incl. setuid/setgid/sticky,
@@ -235,8 +236,8 @@ serialize it in one pass -- assign inodes, compute link counts, write.
 
 ## restore / dump
 
-    s5fs restore [-B 512|1024] [-d device | -b blocks | -s sectors] dumpfile image
-    s5fs dump    [-B 512|1024] [-A pdp11|le|be] [-T] image dumpfile
+    s5fs restore [-B 512|1024|2048] [-d device | -b blocks | -s sectors] dumpfile image
+    s5fs dump    [-B 512|1024|2048] [-A pdp11|le|be] [-T] image dumpfile
 
 `restore` reads a 2.9BSD `dump(8)` tape into an image (the job of `restor(8)`);
 `dump` is the reverse, writing a tape from an image (the job of `dump(8)`).  A
@@ -388,7 +389,7 @@ reverse.
 
 ## fsck
 
-    s5fs fsck [-B 512|1024] [-A pdp11|le|be] [-l] image
+    s5fs fsck [-B 512|1024|2048] [-A pdp11|le|be] [-l] image
 
 Decodes the superblock, walks every allocated inode's block tree (direct +
 single/double/triple indirect), traverses the chained free list, confirms the
@@ -426,7 +427,8 @@ The writer/reader cover the whole standalone s5fs family:
   builds use `-B 512`.
 - **3BSD / 4.0 / 4.1** (VAX): `-B 512 -a le` (NADDR 13) -- same s5fs structure,
   little-endian.
-- other SysV hosts: `-a le` or `-a be` as the CPU dictates.
+- **System V** (VAX / 3B / x86 / 68k): `-B 512|1024|2048 -a le`|`be` (NADDR 13);
+  2048 (`Fs4b`) is the largest s5fs block size, raising the ceiling to 32 GiB.
 
 Out of scope: **V6** (an older, incompatible filesystem -- 2-byte block
 addresses) and **2.11BSD** (its filesystem diverged) -- and 4.2BSD onward,
@@ -436,14 +438,25 @@ which moved to FFS.
 
 The traditional filesystem packs each block address into an inode as **3 bytes**
 (the PDP-11 `l3` format), so a filesystem holds at most **2^24 = 16,777,216
-blocks** -- **16 GiB** at 1024-byte blocks, **8 GiB** at 512.  `mkfs` (and the
-other create paths) refuse a larger size rather than silently truncating.
-Secondary limits: at most ~1M inodes (the i-list start `s_isize` is a 16-bit
-field, so <= 65533 i-list blocks), and any single file is capped at **2 GiB**
-(`di_size` is a signed 32-bit `off_t`).  Block size is **512 or 1024** only --
-what the V7->2.10 kernels understand; the SysV lineage later added 2048 (which
-would raise the ceiling to 32 GiB) but no PDP-11 kernel reads it, so it is out
-of scope here.
+blocks**.  `mkfs` (and the other create paths) refuse a larger size rather than
+silently truncating.  With the three supported block sizes that ceiling is:
+
+| block size | max filesystem | who uses it |
+|---|---|---|
+| **512**  |  8 GiB | V7 |
+| **1024** | 16 GiB | 2.x BSD (UCB) |
+| **2048** | 32 GiB | System V (`Fs4b`) |
+
+2048 is the family maximum -- the s5fs superblock's block-size code only defines
+up to 2048; anything larger is FFS, a different filesystem.  Secondary limits:
+at most ~1M inodes (the i-list start `s_isize` is a 16-bit field, so <= 65533
+i-list blocks), and any single file is capped at **2 GiB** (`di_size` is a
+signed 32-bit `off_t`).
+
+Note there is no on-disk block-size marker in this (V7-derived) superblock, so
+a reader must be told the size (`-B`), exactly as the era's compile-time `BSIZE`
+worked; 512/1024 are the PDP-11 world, 2048 is there for SysV-era targets on
+other CPUs (paired with `-a le`/`-a be`).
 
 ## Validation
 

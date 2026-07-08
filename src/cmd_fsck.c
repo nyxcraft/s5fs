@@ -261,7 +261,7 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 	uint8_t  *isdir = NULL, *alloc = NULL;
 
 	memset(&c, 0, sizeof c);
-	if (bsize != 512 && bsize != 1024) die("block size must be 512 or 1024");
+	if (!P11_BSIZE_OK(bsize)) die("block size must be 512, 1024, or 2048");
 
 	c.fd = open(path, repair ? O_RDWR : O_RDONLY);
 	if (c.fd < 0) { fprintf(stderr, "s5fs fsck: %s: %s\n", path, strerror(errno)); return 1; }
@@ -567,7 +567,7 @@ int cmd_clri(int argc, char **argv)		/* clear (zero) an inode by number */
 		}
 	}
 	if (optind > argc - 2) { fprintf(stderr, "usage: s5fs clri [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] image inode...\n"); return 2; }
-	if (bsize != 512 && bsize != 1024) die("block size must be 512 or 1024");
+	if (!P11_BSIZE_OK(bsize)) die("block size must be 512, 1024, or 2048");
 	if (device_resolve_part(dev, part, ospec, &base, &plen) < 0) return 2;
 	c.base = base;
 	c.fd = open(argv[optind], O_RDWR);

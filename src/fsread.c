@@ -48,7 +48,7 @@ int fsr_open(FSR *r, const char *path, uint32_t bsize, int forced_bo, int64_t ba
 
 	memset(r, 0, sizeof *r);
 	if (bsize == 0) bsize = 1024;
-	if (bsize != 512 && bsize != 1024) return -1;
+	if (!P11_BSIZE_OK(bsize)) return -1;
 	r->fd = open(path, O_RDONLY);
 	if (r->fd < 0) return -1;
 

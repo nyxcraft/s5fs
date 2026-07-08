@@ -88,6 +88,16 @@ if cmp -s "$T/v.orig" "$T/v.back"; then ok "vhd unwrap == original"; else no "vh
 "$S5" mkfs -a le -d rl02 "$T/le.dsk" >/dev/null 2>&1
 if fsck_clean "$T/le.dsk"; then ok "byte order le -> fsck clean"; else no "byte order le -> fsck clean"; fi
 
+# 10b. 2048-byte blocks: create, round-trip a multi-block file, fsck
+"$S5" mkfs -B 2048 -d rp06 "$T/b2k.dsk" >/dev/null 2>&1
+head -c 200000 /dev/zero 2>/dev/null | tr '\0' 'Z' > "$T/big" 2>/dev/null
+"$S5" put -B 2048 "$T/b2k.dsk" "$T/big" /big >/dev/null 2>&1
+"$S5" get -B 2048 "$T/b2k.dsk" /big "$T/big.out" >/dev/null 2>&1
+if cmp -s "$T/big" "$T/big.out" && fsck_clean -B 2048 "$T/b2k.dsk"; then ok "2048-byte blocks round-trip + fsck"; else no "2048-byte blocks round-trip + fsck"; fi
+
+# 10c. oversize filesystem is refused, not silently truncated
+if ! "$S5" mkfs -b 16777217 "$T/huge.dsk" >/dev/null 2>&1; then ok "reject > 2^24 blocks"; else no "reject > 2^24 blocks"; fi
+
 # 11. interactive shell drives the engine
 printf 'mkdir sub\ncd sub\nput %s g\nls\nquit\n' "$T/src" | "$S5" shell "$T/a.dsk" >/dev/null 2>&1
 if "$S5" cat "$T/a.dsk" /sub/g 2>/dev/null | grep -q fox && fsck_clean "$T/a.dsk"; then ok "shell session -> fsck clean"; else no "shell session -> fsck clean"; fi

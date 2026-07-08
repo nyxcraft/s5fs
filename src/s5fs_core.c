@@ -11,7 +11,7 @@
  *     codec (fs->bo, see s5endian.h) so the same writer emits PDP-11, VAX/LE,
  *     or big-endian s5fs images.
  *   - mkfs's file-scope globals are gathered into an S5FS handle.
- *   - The block size is a runtime profile (512 or 1024) rather than a compile
+ *   - The block size is a runtime profile (512, 1024, or 2048) rather than a compile
  *     -time constant, but both profiles reproduce the corresponding 2.9 build.
  */
 
@@ -505,8 +505,8 @@ int s5fs_begin(S5FS *fs, int fd, uint32_t nblocks, const s5fs_opts *opts)
 
 	/* block-size profile */
 	fs->bsize = opts->bsize ? opts->bsize : 1024;
-	if (fs->bsize != 512 && fs->bsize != 1024) {
-		s5fs_fail(fs, "bsize must be 512 or 1024");
+	if (!P11_BSIZE_OK(fs->bsize)) {
+		s5fs_fail(fs, "bsize must be 512, 1024, or 2048");
 		return -1;
 	}
 	fs->clsize  = fs->bsize / 512;
@@ -519,7 +519,7 @@ int s5fs_begin(S5FS *fs, int fd, uint32_t nblocks, const s5fs_opts *opts)
 	if (nblocks > P11_MAXFSBLKS) {
 		snprintf(fs->err, sizeof fs->err,
 		    "too large: %lu blocks; s5fs max is 2^24 = 16777216 blocks "
-		    "(inode addresses are 3-byte; 16G at 1K, 8G at 512B)",
+		    "(3-byte inode addrs; 32G@2K, 16G@1K, 8G@512)",
 		    (unsigned long)nblocks);
 		fs->error = 1;
 		return -1;
@@ -602,7 +602,7 @@ int s5fs_mount(S5FS *fs, int fd, uint32_t bsize, const s5_codec *bo, int64_t bas
 	fs->base = base;
 	fs->bo = bo;
 	fs->bsize = bsize ? bsize : 1024;
-	if (fs->bsize != 512 && fs->bsize != 1024) { s5fs_fail(fs, "bsize must be 512 or 1024"); return -1; }
+	if (!P11_BSIZE_OK(fs->bsize)) { s5fs_fail(fs, "bsize must be 512, 1024, or 2048"); return -1; }
 	fs->clsize  = fs->bsize / 512;
 	fs->inopb   = fs->bsize / P11_DINODESZ;
 	fs->naddr   = (fs->bsize == 1024) ? 7 : 13;

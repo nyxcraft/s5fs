@@ -183,7 +183,7 @@ int cmd_restore(int argc, char **argv)
 	image    = argv[optind + 1];
 
 	if (opts.bsize == 0) opts.bsize = 1024;
-	if (opts.bsize != 512 && opts.bsize != 1024) { fprintf(stderr, "s5fs restore: block size must be 512 or 1024\n"); return 2; }
+	if (!P11_BSIZE_OK(opts.bsize)) { fprintf(stderr, "s5fs restore: block size must be 512, 1024, or 2048\n"); return 2; }
 	per = opts.bsize / 512;
 	if (dev) { if (blocks || sectors) { fprintf(stderr, "s5fs restore: give one of -d/-b/-s\n"); return 2; } sectors = dev->blocks; }
 	if (sectors) { if (blocks) { fprintf(stderr, "s5fs restore: give -b or -s, not both\n"); return 2; } blocks = sectors / per; }

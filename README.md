@@ -432,6 +432,19 @@ Out of scope: **V6** (an older, incompatible filesystem -- 2-byte block
 addresses) and **2.11BSD** (its filesystem diverged) -- and 4.2BSD onward,
 which moved to FFS.
 
+## Limits
+
+The traditional filesystem packs each block address into an inode as **3 bytes**
+(the PDP-11 `l3` format), so a filesystem holds at most **2^24 = 16,777,216
+blocks** -- **16 GiB** at 1024-byte blocks, **8 GiB** at 512.  `mkfs` (and the
+other create paths) refuse a larger size rather than silently truncating.
+Secondary limits: at most ~1M inodes (the i-list start `s_isize` is a 16-bit
+field, so <= 65533 i-list blocks), and any single file is capped at **2 GiB**
+(`di_size` is a signed 32-bit `off_t`).  Block size is **512 or 1024** only --
+what the V7->2.10 kernels understand; the SysV lineage later added 2048 (which
+would raise the ceiling to 32 GiB) but no PDP-11 kernel reads it, so it is out
+of scope here.
+
 ## Validation
 
 - **Byte decode** -- superblock, reserved inodes, and root directory decode to

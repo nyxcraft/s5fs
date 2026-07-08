@@ -36,6 +36,9 @@
 #define P11_MAXFN	500	/* cap on the free-list interleave n   */
 #define P11_MAXBSIZE	1024	/* largest block size we support       */
 #define P11_MAXNINDIR	(P11_MAXBSIZE / 4)	/* daddr_t per indirect block */
+#define P11_MAXFSBLKS	(1UL << 24)	/* max blocks: di_addr is a 3-byte (24-bit)
+					 * block number, so a filesystem can hold at
+					 * most 2^24 blocks (16G @1K, 8G @512) */
 
 /* i_mode / di_mode bits (from <sys/inode.h>) */
 #define P11_IFMT	0170000	/* file type mask        */

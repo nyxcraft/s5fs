@@ -513,6 +513,17 @@ int s5fs_begin(S5FS *fs, int fd, uint32_t nblocks, const s5fs_opts *opts)
 	fs->inopb   = fs->bsize / P11_DINODESZ;			/* 8 or 16 */
 	fs->naddr   = (fs->bsize == 1024) ? 7 : 13;		/* UCB_NKB */
 	fs->laddr   = fs->naddr - 3;
+
+	/* block numbers are 3-byte (24-bit) in the inode -- anything beyond 2^24
+	 * blocks would be silently truncated by the l3 packing, so refuse. */
+	if (nblocks > P11_MAXFSBLKS) {
+		snprintf(fs->err, sizeof fs->err,
+		    "too large: %lu blocks; s5fs max is 2^24 = 16777216 blocks "
+		    "(inode addresses are 3-byte; 16G at 1K, 8G at 512B)",
+		    (unsigned long)nblocks);
+		fs->error = 1;
+		return -1;
+	}
 	fs->nindir  = fs->bsize / 4;
 	fs->ndirect = fs->bsize / P11_DIRENTSZ;
 

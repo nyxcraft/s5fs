@@ -247,6 +247,167 @@ static void walk_dir(CK *c, uint32_t ino, const char *path)
 	free(buf);
 }
 
+/* mode has a valid s5fs file type */
+static int good_mode(uint16_t mode)
+{
+	switch (mode & P11_IFMT) {
+	case P11_IFREG: case P11_IFDIR: case P11_IFCHR: case P11_IFBLK: return 1;
+	default: return 0;
+	}
+}
+
+/* Phase 3 connectivity: DFS from a directory, marking every reachable inode.
+ * Catches orphan directories (whose own "." keeps their link count nonzero). */
+static void mark_reached(CK *c, uint32_t ino, uint8_t *reached, uint32_t nino)
+{
+	uint16_t mode, nlink;
+	int32_t size, addr[P11_MAXNADDR];
+	uint32_t nblk, b;
+	uint8_t *buf;
+
+	if (ino == 0 || ino > nino || reached[ino])
+		return;
+	reached[ino] = 1;
+	if (read_inode(c, ino, &mode, &nlink, &size, addr) < 0) return;
+	if ((mode & P11_IFMT) != P11_IFDIR) return;
+	buf = malloc(c->bsize);
+	if (!buf) die("out of memory");
+	nblk = ((uint32_t)size + c->bsize - 1) / c->bsize;
+	for (b = 0; b < nblk; b++) {
+		uint32_t phys = bmap(c, addr, b), e;
+		if (!phys) continue;
+		rdblk(c, phys, buf);
+		for (e = 0; e < c->ndirect; e++) {
+			uint8_t *d = buf + e * P11_DIRENTSZ;
+			uint32_t di = c->bo->get16(d);
+			char nm[P11_DIRSIZ + 1];
+			if (di == 0 || di > nino) continue;
+			memcpy(nm, d + 2, P11_DIRSIZ); nm[P11_DIRSIZ] = '\0';
+			if (!strcmp(nm, ".") || !strcmp(nm, "..")) continue;
+			mark_reached(c, di, reached, nino);
+		}
+	}
+	free(buf);
+}
+
+/* find `name` in directory `dino`; 0 if absent */
+static uint32_t find_in_dir(CK *c, uint32_t dino, const char *name)
+{
+	uint16_t mode, nlink;
+	int32_t size, addr[P11_MAXNADDR];
+	uint32_t nblk, b, res = 0;
+	uint8_t *buf;
+
+	if (read_inode(c, dino, &mode, &nlink, &size, addr) < 0) return 0;
+	if ((mode & P11_IFMT) != P11_IFDIR) return 0;
+	buf = malloc(c->bsize);
+	if (!buf) die("out of memory");
+	nblk = ((uint32_t)size + c->bsize - 1) / c->bsize;
+	for (b = 0; b < nblk && !res; b++) {
+		uint32_t phys = bmap(c, addr, b), e;
+		if (!phys) continue;
+		rdblk(c, phys, buf);
+		for (e = 0; e < c->ndirect; e++) {
+			uint32_t di = c->bo->get16(buf + e * P11_DIRENTSZ);
+			char nm[P11_DIRSIZ + 1];
+			if (di == 0) continue;
+			memcpy(nm, buf + e * P11_DIRENTSZ + 2, P11_DIRSIZ); nm[P11_DIRSIZ] = '\0';
+			if (!strcmp(nm, name)) { res = di; break; }
+		}
+	}
+	free(buf);
+	return res;
+}
+
+/* patch one inode's di_nlink */
+static void ck_set_nlink(CK *c, uint32_t ino, uint16_t nlink)
+{
+	uint8_t b[P11_MAXBSIZE];
+	uint32_t blk = (ino + 2 * c->inopb - 1) / c->inopb;
+	uint32_t o = ((ino + 2 * c->inopb - 1) % c->inopb) * P11_DINODESZ;
+	rdblk(c, blk, b);
+	c->bo->put16(b + o + P11_DI_NLINK, nlink);
+	wtblk(c, blk, b);
+}
+
+/* point directory `dino`'s ".." entry (slot 1 of its first block) at `parent` */
+static void ck_set_dotdot(CK *c, uint32_t dino, uint32_t parent)
+{
+	uint16_t mode, nlink;
+	int32_t size, addr[P11_MAXNADDR];
+	uint8_t *b;
+	uint32_t phys;
+	if (read_inode(c, dino, &mode, &nlink, &size, addr) < 0) return;
+	phys = bmap(c, addr, 0);
+	if (!phys) return;
+	b = malloc(c->bsize);
+	if (!b) die("out of memory");
+	rdblk(c, phys, b);
+	c->bo->put16(b + 1 * P11_DIRENTSZ, (uint16_t)parent);
+	wtblk(c, phys, b);
+	free(b);
+}
+
+/* put `ino`->`name` into a free slot of directory `dir`; 0 if it's full */
+static int dir_reuse_slot(CK *c, uint32_t dir, uint32_t ino, const char *name)
+{
+	uint16_t mode, nlink;
+	int32_t size, addr[P11_MAXNADDR];
+	uint32_t nblk, b, done = 0;
+	uint8_t *buf;
+	size_t l = strlen(name);
+	if (l > P11_DIRSIZ) l = P11_DIRSIZ;
+	if (read_inode(c, dir, &mode, &nlink, &size, addr) < 0) return 0;
+	buf = malloc(c->bsize);
+	if (!buf) die("out of memory");
+	nblk = ((uint32_t)size + c->bsize - 1) / c->bsize;
+	for (b = 0; b < nblk && !done; b++) {
+		uint32_t phys = bmap(c, addr, b), e;
+		if (!phys) continue;
+		rdblk(c, phys, buf);
+		for (e = 0; e < c->ndirect; e++) {
+			if ((b * c->ndirect + e) * P11_DIRENTSZ >= (uint32_t)size) break;
+			if (c->bo->get16(buf + e * P11_DIRENTSZ) == 0) {
+				c->bo->put16(buf + e * P11_DIRENTSZ, (uint16_t)ino);
+				memset(buf + e * P11_DIRENTSZ + 2, 0, P11_DIRSIZ);
+				memcpy(buf + e * P11_DIRENTSZ + 2, name, l);
+				wtblk(c, phys, buf);
+				done = 1;
+				break;
+			}
+		}
+	}
+	free(buf);
+	return (int)done;
+}
+
+/* recompute every inode's directory reference count (after repairs) */
+static void ck_recount(CK *c, uint32_t *linkcnt, uint32_t nino)
+{
+	uint32_t ino;
+	uint8_t *db = malloc(c->bsize);
+	if (!db) die("out of memory");
+	for (ino = 0; ino <= nino; ino++) linkcnt[ino] = 0;
+	for (ino = 1; ino <= nino; ino++) {
+		uint16_t mode, nlink;
+		int32_t size, addr[P11_MAXNADDR];
+		uint32_t nblk, b;
+		if (read_inode(c, ino, &mode, &nlink, &size, addr) < 0) continue;
+		if ((mode & P11_IFMT) != P11_IFDIR) continue;
+		nblk = ((uint32_t)size + c->bsize - 1) / c->bsize;
+		for (b = 0; b < nblk; b++) {
+			uint32_t phys = bmap(c, addr, b), e;
+			if (!phys) continue;
+			rdblk(c, phys, db);
+			for (e = 0; e < c->ndirect; e++) {
+				uint32_t di = c->bo->get16(db + e * P11_DIRENTSZ);
+				if (di != 0 && di <= nino) linkcnt[di]++;
+			}
+		}
+	}
+	free(db);
+}
+
 /* which checks fsck_run performs; icheck=blocks, dcheck=links, fsck=both */
 #define CHK_BLOCKS 1
 #define CHK_LINKS  2
@@ -258,7 +419,7 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 	uint8_t sb[P11_MAXBSIZE];
 	uint32_t ino, nino, used = 0, files = 0, i;
 	uint32_t *dnlink = NULL, *linkcnt = NULL;	/* dcheck: di_nlink vs refs */
-	uint8_t  *isdir = NULL, *alloc = NULL;
+	uint8_t  *isdir = NULL, *alloc = NULL, *reached = NULL;
 	int sysv;					/* System V superblock dialect */
 	uint32_t tfree_off, tinode_off;
 
@@ -316,6 +477,11 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 		alloc[ino] = 1;
 		dnlink[ino] = nlink;
 		if ((mode & P11_IFMT) == P11_IFDIR) isdir[ino] = 1;
+		if ((checks & CHK_LINKS) && !good_mode(mode)) {
+			fprintf(stderr, "  ! inode %u has invalid mode 0%o (unknown file type)\n",
+			        ino, mode);
+			c.errors++;
+		}
 		/* block accounting (icheck): only regular files and directories have
 		 * block maps -- for special files addr[0] is the device number. */
 		if (!(checks & CHK_BLOCKS))
@@ -396,10 +562,25 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 				if (!phys) continue;
 				rdblk(&c, phys, db);
 				for (e = 0; e < c.ndirect; e++) {
-					uint32_t di = c.bo->get16(db + e * P11_DIRENTSZ);
+					uint8_t *d = db + e * P11_DIRENTSZ;
+					uint32_t di = c.bo->get16(d);
+					char nm[P11_DIRSIZ + 1];
 					if (di == 0) continue;
-					if (di <= nino) linkcnt[di]++;
-					else { fprintf(stderr, "  ! inode %u references out-of-range inode %u\n", ino, di); c.errors++; }
+					memcpy(nm, d + 2, P11_DIRSIZ); nm[P11_DIRSIZ] = '\0';
+					if (di > nino) {
+						fprintf(stderr, "  ! dir %u entry '%s' -> out-of-range inode %u\n", ino, nm, di);
+						c.errors++;
+						continue;
+					}
+					linkcnt[di]++;
+					if (!alloc[di]) {			/* Phase 2: dangling reference */
+						fprintf(stderr, "  ! dir %u entry '%s' -> unallocated inode %u (dangling)\n", ino, nm, di);
+						c.errors++;
+					}
+					if (!strcmp(nm, ".") && di != ino) {
+						fprintf(stderr, "  ! dir %u '.' points to %u, not itself\n", ino, di);
+						c.errors++;
+					}
 				}
 			}
 		}
@@ -416,24 +597,91 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 		}
 		if (bad) c.errors++;
 		else printf("link counts OK (%u inodes)\n", files);
+
+		/* Phase 3: connectivity.  Anything allocated but unreachable from root
+		 * is an orphan (an orphan directory still has a nonzero link count from
+		 * its own ".", so reachability -- not link count -- is what finds it). */
+		reached = calloc((size_t)nino + 1, 1);
+		if (!reached) die("out of memory");
+		mark_reached(&c, P11_ROOTINO, reached, nino);
+		reached[P11_BADBLKINO] = 1;	/* inode 1 (bad-block list) is legitimately unlinked */
+		{
+			uint32_t orph = 0;
+			for (ino = 1; ino <= nino; ino++)
+				if (alloc[ino] && !reached[ino]) {
+					orph++;
+					fprintf(stderr, "  ! inode %u (%s) allocated but unreachable from root (orphan)\n",
+					        ino, isdir[ino] ? "dir" : "file");
+				}
+			if (orph) {
+				c.errors++;
+				if (!repair)
+					fprintf(stderr, "    (fsck -p reconnects orphans into /lost+found)\n");
+			}
+		}
 	}
 
 	/* 5) repair: fix link counts (dcheck) and/or salvage the free list (icheck) */
 	if (repair) {
-		uint32_t fixed = 0;
+		uint32_t fixed = 0, zapped = 0, recon = 0;
 		int32_t tf = 0;
 
 		if (checks & CHK_LINKS) {
+			uint32_t lf = find_in_dir(&c, P11_ROOTINO, "lost+found");
+			uint8_t *bb = malloc(c.bsize);
+			if (!bb) die("out of memory");
+
+			/* (a) zero directory entries pointing at free/out-of-range inodes */
 			for (ino = 1; ino <= nino; ino++) {
-				uint8_t b[P11_MAXBSIZE];
-				uint32_t blk, o;
-				if (!alloc[ino] || linkcnt[ino] == dnlink[ino])
-					continue;
-				blk = (ino + 2 * c.inopb - 1) / c.inopb;
-				o = ((ino + 2 * c.inopb - 1) % c.inopb) * P11_DINODESZ;
-				rdblk(&c, blk, b);
-				c.bo->put16(b + o + P11_DI_NLINK, (uint16_t)linkcnt[ino]);
-				wtblk(&c, blk, b);
+				uint16_t mode, nlink; int32_t size, addr[P11_MAXNADDR]; uint32_t nblk, b;
+				if (!isdir[ino] || read_inode(&c, ino, &mode, &nlink, &size, addr) < 0) continue;
+				nblk = ((uint32_t)size + c.bsize - 1) / c.bsize;
+				for (b = 0; b < nblk; b++) {
+					uint32_t phys = bmap(&c, addr, b), e; int dirty = 0;
+					if (!phys) continue;
+					rdblk(&c, phys, bb);
+					for (e = 0; e < c.ndirect; e++) {
+						uint32_t di = c.bo->get16(bb + e * P11_DIRENTSZ);
+						if (di == 0) continue;
+						if (di > nino || !alloc[di]) {
+							c.bo->put16(bb + e * P11_DIRENTSZ, 0);
+							dirty = 1; zapped++;
+						}
+					}
+					if (dirty) wtblk(&c, phys, bb);
+				}
+			}
+			/* (b) reconnect orphans (unreachable-from-root) into /lost+found,
+			 * reusing its preallocated empty slots (mklost leaves plenty) */
+			if (lf) {
+				for (ino = P11_ROOTINO + 1; ino <= nino; ino++) {
+					char nm[16];
+					if (!alloc[ino] || reached[ino]) continue;
+					snprintf(nm, sizeof nm, "#%u", ino);
+					if (!dir_reuse_slot(&c, lf, ino, nm)) {
+						fprintf(stderr, "  ! /lost+found is full; some orphans not reconnected\n");
+						break;
+					}
+					if (isdir[ino]) ck_set_dotdot(&c, ino, lf);	/* its ".." now -> lost+found */
+					mark_reached(&c, ino, reached, nino);		/* and its whole subtree */
+					recon++;
+				}
+			} else if (reached) {
+				for (ino = P11_ROOTINO + 1; ino <= nino; ino++)
+					if (alloc[ino] && !reached[ino]) {
+						fprintf(stderr, "  ! no /lost+found -- cannot reconnect orphan inode %u\n", ino);
+						break;
+					}
+			}
+			free(bb);
+
+			/* (c) recompute link counts after the structural repairs, fix di_nlink */
+			ck_recount(&c, linkcnt, nino);
+			for (ino = 1; ino <= nino; ino++) {
+				uint16_t mode, nlink; int32_t size, addr[P11_MAXNADDR];
+				if (!alloc[ino] || read_inode(&c, ino, &mode, &nlink, &size, addr) < 0) continue;
+				if (nlink == linkcnt[ino]) continue;
+				ck_set_nlink(&c, ino, (uint16_t)linkcnt[ino]);
 				fixed++;
 			}
 		}
@@ -453,10 +701,13 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 			wtblk(&c, P11_SUPERBLK, sb);
 		}
 		close(c.fd);
+		printf("repaired:");
+		if (checks & CHK_LINKS)
+			printf(" %u link count(s), %u orphan(s) -> lost+found, %u dangling entr%s zapped;",
+			       fixed, recon, zapped, zapped == 1 ? "y" : "ies");
 		if (checks & CHK_BLOCKS)
-			printf("repaired: %u link count(s) fixed, free list rebuilt (%d free)\n", fixed, tf);
-		else
-			printf("repaired: %u link count(s) fixed\n", fixed);
+			printf(" free list rebuilt (%d free)", tf);
+		printf("\n");
 		return 0;
 	}
 

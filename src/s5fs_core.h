@@ -41,6 +41,7 @@ typedef struct {
 	int       boot;		/* reserved: leave block 0 for a boot image */
 	s5_endian endian;	/* on-disk byte order; 0 => S5_PDP11        */
 	int64_t   base;		/* byte offset to write the fs at (partition) */
+	int       sysv;		/* also write the System V superblock magic/type */
 } s5fs_opts;
 
 /* The writer handle.  Fields after `error` are internal but exposed so
@@ -48,6 +49,7 @@ typedef struct {
 typedef struct {
 	int      fd;		/* image file, opened read/write */
 	int64_t  base;		/* byte offset of the fs in the file (partition) */
+	int      sysv;		/* superblock carries the System V magic/type */
 	char     err[128];	/* last error message            */
 	int      error;		/* sticky error flag             */
 	const s5_codec *bo;	/* on-disk byte-order codec      */

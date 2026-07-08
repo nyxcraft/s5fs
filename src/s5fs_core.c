@@ -495,6 +495,7 @@ int s5fs_begin(S5FS *fs, int fd, uint32_t nblocks, const s5fs_opts *opts)
 	memset(fs, 0, sizeof *fs);
 	fs->fd = fd;
 	fs->base = opts->base;
+	fs->sysv = opts->sysv;
 
 	/* on-disk byte order (default S5_PDP11 == 0) */
 	fs->bo = s5_codec_for(opts->endian);
@@ -620,11 +621,19 @@ int s5fs_mount(S5FS *fs, int fd, uint32_t bsize, const s5_codec *bo, int64_t bas
 	fs->s_ninode = (int16_t)bo->get16(sb + P11_SB_NINODE);
 	for (i = 0; i < P11_NICINOD; i++)
 		fs->s_inode[i] = bo->get16(sb + P11_SB_INODE + 2 * i);
-	fs->s_tfree  = (int32_t)bo->get32(sb + P11_SB_TFREE);
-	fs->s_tinode = (int16_t)bo->get16(sb + P11_SB_TINODE);
 	fs->s_time   = (int32_t)bo->get32(sb + P11_SB_TIME);
-	fs->s_m = (int16_t)bo->get16(sb + P11_SB_DINFO);
-	fs->s_n = (int16_t)bo->get16(sb + P11_SB_DINFO + 2);
+	if (bo->get32(sb + P11_SB_MAGIC) == (uint32_t)P11_FS_MAGIC) {
+		fs->sysv     = 1;			/* System V dialect: totals moved */
+		fs->s_tfree  = (int32_t)bo->get32(sb + P11_SB_SVTFREE);
+		fs->s_tinode = (int16_t)bo->get16(sb + P11_SB_SVTINODE);
+		fs->s_m = (int16_t)bo->get16(sb + P11_SB_SVDINFO);
+		fs->s_n = (int16_t)bo->get16(sb + P11_SB_SVDINFO + 2);
+	} else {
+		fs->s_tfree  = (int32_t)bo->get32(sb + P11_SB_TFREE);
+		fs->s_tinode = (int16_t)bo->get16(sb + P11_SB_TINODE);
+		fs->s_m = (int16_t)bo->get16(sb + P11_SB_DINFO);
+		fs->s_n = (int16_t)bo->get16(sb + P11_SB_DINFO + 2);
+	}
 	if (fs->s_isize < P11_ILISTSTART || fs->s_isize >= fs->s_fsize) {
 		s5fs_fail(fs, "bad superblock");
 		return -1;
@@ -648,11 +657,25 @@ void s5fs_finish(S5FS *fs)
 		fs->bo->put16(sb + P11_SB_INODE + 2 * i, fs->s_inode[i]);
 	/* s_flock/s_ilock/s_fmod/s_ronly stay 0 */
 	fs->bo->put32(sb + P11_SB_TIME,   (uint32_t)fs->s_time);
-	fs->bo->put32(sb + P11_SB_TFREE,  (uint32_t)fs->s_tfree);
-	fs->bo->put16(sb + P11_SB_TINODE, (uint16_t)fs->s_tinode);
-	fs->bo->put16(sb + P11_SB_DINFO + 0, (uint16_t)fs->s_m);
-	fs->bo->put16(sb + P11_SB_DINFO + 2, (uint16_t)fs->s_n);
-	/* s_fsmnt/s_lasti/s_nbehind stay 0 */
+	if (fs->sysv) {
+		/* System V tail: s_dinfo[4] sits where V7 keeps s_tfree, so the
+		 * totals move later; add the FsMAGIC + block-size type + clean state
+		 * so a SysV kernel recognises the volume and its block size. */
+		fs->bo->put16(sb + P11_SB_SVDINFO + 0, (uint16_t)fs->s_m);
+		fs->bo->put16(sb + P11_SB_SVDINFO + 2, (uint16_t)fs->s_n);
+		fs->bo->put32(sb + P11_SB_SVTFREE,  (uint32_t)fs->s_tfree);
+		fs->bo->put16(sb + P11_SB_SVTINODE, (uint16_t)fs->s_tinode);
+		fs->bo->put32(sb + P11_SB_STATE,
+		              (uint32_t)(P11_FS_CLEAN - (uint32_t)fs->s_time));
+		fs->bo->put32(sb + P11_SB_MAGIC, (uint32_t)P11_FS_MAGIC);
+		fs->bo->put32(sb + P11_SB_TYPE,  (uint32_t)P11_FS_TYPE(fs->bsize));
+	} else {
+		fs->bo->put32(sb + P11_SB_TFREE,  (uint32_t)fs->s_tfree);
+		fs->bo->put16(sb + P11_SB_TINODE, (uint16_t)fs->s_tinode);
+		fs->bo->put16(sb + P11_SB_DINFO + 0, (uint16_t)fs->s_m);
+		fs->bo->put16(sb + P11_SB_DINFO + 2, (uint16_t)fs->s_n);
+		/* s_fsmnt/s_lasti/s_nbehind stay 0 */
+	}
 
 	s5fs_wtblk(fs, P11_SUPERBLK, sb);
 }

@@ -100,6 +100,22 @@
 #define P11_SB_LASTI	(P11_SB_FSMNT + 12)		 /* 440, ino_t */
 #define P11_SB_NBEHIND	(P11_SB_LASTI + 2)		 /* 442, ino_t; ends 444 */
 
+/* System V (s5) superblock dialect.  The common part (0..417) is identical, but
+ * SysV inserts s_dinfo[4] at 418, pushing the free/inode totals later, and adds
+ * a magic + block-size type at the tail so a SysV kernel auto-detects the fs.
+ * Opt-in (`mkfs -F sysv`); these all live in the V7 layout's zeroed tail, so a
+ * SysV-flavoured image still reads fine as a plain image (isize/fsize/inodes/
+ * dirs/free-list are dialect-independent). */
+#define P11_SB_SVDINFO	418	/* SysV: short[4] device info            */
+#define P11_SB_SVTFREE	426	/* SysV: daddr_t total free blocks       */
+#define P11_SB_SVTINODE	430	/* SysV: ino_t total free inodes         */
+#define P11_SB_STATE	500	/* SysV: long fs state (clean marker)    */
+#define P11_SB_MAGIC	504	/* SysV: long 0xfd187e20                 */
+#define P11_SB_TYPE	508	/* SysV: long 1/2/3 = 512/1024/2048      */
+#define P11_FS_MAGIC	0xfd187e20UL	/* SysV FsMAGIC                  */
+#define P11_FS_CLEAN	0x7c269d38UL	/* s_state = FS_CLEAN - s_time => clean */
+#define P11_FS_TYPE(b)	((b) == 512 ? 1 : (b) == 1024 ? 2 : 3)	/* Fs1b/2b/4b */
+
 /* Free-block list block (struct fblk): count then the addresses. */
 #define P11_FB_NFREE	0				/* short */
 #define P11_FB_FREE	2				/* daddr_t[NICFREE] */

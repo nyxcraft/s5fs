@@ -98,6 +98,17 @@ if cmp -s "$T/big" "$T/big.out" && fsck_clean -B 2048 "$T/b2k.dsk"; then ok "204
 # 10c. oversize filesystem is refused, not silently truncated
 if ! "$S5" mkfs -b 16777217 "$T/huge.dsk" >/dev/null 2>&1; then ok "reject > 2^24 blocks"; else no "reject > 2^24 blocks"; fi
 
+# 10d. System V superblock flavor: FsMAGIC written, survives an rw round-trip
+"$S5" mkfs -F sysv -a le -d rp06 "$T/sv.dsk" >/dev/null 2>&1   # 1024-byte blocks -> superblock @1024
+m1=$(od -An -tx1 -j 1528 -N4 "$T/sv.dsk" | tr -d ' \n')        # s_magic @ 1024+504; LE fd187e20 = 20 7e 18 fd
+"$S5" put "$T/sv.dsk" "$T/src" /f >/dev/null 2>&1
+m2=$(od -An -tx1 -j 1528 -N4 "$T/sv.dsk" | tr -d ' \n')
+"$S5" mkfs -a le -d rp06 "$T/v7.dsk" >/dev/null 2>&1
+mv7=$(od -An -tx1 -j 1528 -N4 "$T/v7.dsk" | tr -d ' \n')
+if [ "$m1" = 207e18fd ] && [ "$m2" = 207e18fd ] && [ "$mv7" = 00000000 ] && fsck_clean "$T/sv.dsk"; then
+	ok "SysV superblock (FsMAGIC + rw round-trip; absent by default)"
+else no "SysV superblock (m1=$m1 m2=$m2 v7=$mv7)"; fi
+
 # 11. interactive shell drives the engine
 printf 'mkdir sub\ncd sub\nput %s g\nls\nquit\n' "$T/src" | "$S5" shell "$T/a.dsk" >/dev/null 2>&1
 if "$S5" cat "$T/a.dsk" /sub/g 2>/dev/null | grep -q fox && fsck_clean "$T/a.dsk"; then ok "shell session -> fsck clean"; else no "shell session -> fsck clean"; fi

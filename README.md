@@ -172,11 +172,13 @@ shell -- asserting `fsck` is clean after every mutating flow.
 
 ## mkfs
 
-    s5fs mkfs [-B 512|1024|2048] [-a pdp11|le|be] [-d device | -b blocks | -s sectors]
+    s5fs mkfs [-B 512|1024|2048] [-a pdp11|le|be] [-F v7|sysv]
+              [-d device | -b blocks | -s sectors]
               [-r release] [-m m] [-n n] [-t mtime] [-i ninode] image
 
 `-B` is the filesystem block size (default 1024, the UCB_NKB config; 512 is the
 non-UCB / V7 config; 2048 is the System V `Fs4b` size for non-PDP targets).
+`-F` picks the superblock flavor: `v7` (default) or `sysv` (see Compatibility).
 Size comes from a known device (`-d`, see `s5fs
 devices`), filesystem blocks (`-b`), or 512-byte SIMH sectors (`-s`).  `-m`/`-n`
 are the free-list interleave (default 5/10, as mkfs), `-t` pins the timestamp
@@ -429,6 +431,12 @@ The writer/reader cover the whole standalone s5fs family:
   little-endian.
 - **System V** (VAX / 3B / x86 / 68k): `-B 512|1024|2048 -a le`|`be` (NADDR 13);
   2048 (`Fs4b`) is the largest s5fs block size, raising the ceiling to 32 GiB.
+  Add `-F sysv` so `mkfs` also stamps the System V superblock magic
+  (`0xfd187e20`) + block-size type at the tail, so a SysV kernel auto-detects
+  the volume and its block size; `s5fs` reads its own SysV images back (the
+  totals move to the SysV offsets).  This is written to the documented
+  `struct filsys` layout but is **not verified against a real System V kernel**
+  (none is available here); the default flavor is plain V7/2.9.
 
 Out of scope: **V6** (an older, incompatible filesystem -- 2-byte block
 addresses) and **2.11BSD** (its filesystem diverged) -- and 4.2BSD onward,

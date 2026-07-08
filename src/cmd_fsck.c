@@ -259,6 +259,8 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 	uint32_t ino, nino, used = 0, files = 0, i;
 	uint32_t *dnlink = NULL, *linkcnt = NULL;	/* dcheck: di_nlink vs refs */
 	uint8_t  *isdir = NULL, *alloc = NULL;
+	int sysv;					/* System V superblock dialect */
+	uint32_t tfree_off, tinode_off;
 
 	memset(&c, 0, sizeof c);
 	if (!P11_BSIZE_OK(bsize)) die("block size must be 512, 1024, or 2048");
@@ -283,8 +285,11 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 	c.fsize  = c.bo->get32(sb + P11_SB_FSIZE);
 	c.nfree  = (int16_t)c.bo->get16(sb + P11_SB_NFREE);
 	c.ninode = c.bo->get16(sb + P11_SB_NINODE);
-	c.tfree  = (int32_t)c.bo->get32(sb + P11_SB_TFREE);
-	c.tinode = c.bo->get16(sb + P11_SB_TINODE);
+	sysv = (c.bo->get32(sb + P11_SB_MAGIC) == (uint32_t)P11_FS_MAGIC);
+	tfree_off  = sysv ? P11_SB_SVTFREE  : P11_SB_TFREE;	/* SysV moves the totals */
+	tinode_off = sysv ? P11_SB_SVTINODE : P11_SB_TINODE;
+	c.tfree  = (int32_t)c.bo->get32(sb + tfree_off);
+	c.tinode = c.bo->get16(sb + tinode_off);
 
 	if (c.isize < P11_ILISTSTART || c.isize >= c.fsize || c.fsize == 0)
 		die("superblock looks wrong (bad isize/fsize; try -B 512 or -A)");
@@ -443,8 +448,8 @@ static int fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 			c.bo->put16(sb + P11_SB_NFREE, (uint16_t)nf);
 			for (i = 0; i < P11_NICFREE; i++)
 				c.bo->put32(sb + P11_SB_FREE + 4 * i, (uint32_t)fr[i]);
-			c.bo->put32(sb + P11_SB_TFREE, (uint32_t)tf);
-			c.bo->put16(sb + P11_SB_TINODE, (uint16_t)((c.isize - 2) * c.inopb - files));
+			c.bo->put32(sb + tfree_off, (uint32_t)tf);
+			c.bo->put16(sb + tinode_off, (uint16_t)((c.isize - 2) * c.inopb - files));
 			wtblk(&c, P11_SUPERBLK, sb);
 		}
 		close(c.fd);

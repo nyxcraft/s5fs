@@ -34,6 +34,7 @@ static const struct subcmd {
 	{ "fsdb",    cmd_fsdb,    "interactive filesystem debugger (-w to edit)" },
 	{ "manifest",cmd_manifest,"fingerprint an image (path/mode/owner/cksum)" },
 	{ "verify",  cmd_verify,  "diff an image against a manifest"         },
+	{ "recover", cmd_recover, "undelete: deleted names + carve free blocks" },
 	{ "boot",    cmd_boot,    "install a boot block into block 0"        },
 	{ "vhd",     cmd_vhd,     "wrap/unwrap a fixed-VHD container"        },
 	{ "ls",      cmd_ls,      "list a directory (-l long, -a all)"       },

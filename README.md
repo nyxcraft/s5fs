@@ -23,6 +23,8 @@ bar the cross `as`/`cc` are held to.
     s5fs dcheck    directory link-count check
     s5fs clri      clear (zero) inodes by number
     s5fs fsdb      interactive filesystem debugger (-w to edit)
+    s5fs manifest  fingerprint an image (path/mode/owner/size/cksum per file)
+    s5fs verify    diff an image against a manifest
     s5fs boot      install a primary bootstrap into block 0
     s5fs vhd       wrap/unwrap a fixed-VHD container (wrap/unwrap/info)
 
@@ -154,6 +156,7 @@ single/double/triple-indirect map (files of any size), and after edits
     src/cmd_fs.c     `ls`/`cat`/`get`/`put`/`cp`/`mv`/`rm`/`mkdir`/`rmdir`/`chmod`
     src/cmd_shell.c  `shell` -- the interactive explorer REPL (paths)
     src/cmd_fsdb.c   `fsdb`  -- the interactive debugger (raw inodes/blocks)
+    src/cmd_manifest.c `manifest`/`verify` -- mtree-style fingerprint + diff
     src/fsutil.h     small presentation helpers (mode string, path resolve)
     src/cmd_fsck.c   `fsck`   subcommand -- an independent reader/checker.
     src/cmd_mount.c  `mount`/`umount` -- a thin FUSE front-end over s5fs_rw
@@ -433,6 +436,35 @@ inode/block level -- the forensic / repair / learn-the-format tool:
 
 Read-only unless `-w`.  It reuses the same reader and writer core as the rest of
 the tools, so what you see and change is exactly what they see.
+
+## Manifest / verify
+
+    s5fs manifest [-B ..] [-A ..] [-d dev -P part | -o blk] image
+    s5fs verify   [-B ..] [-A ..] [-d dev -P part | -o blk] image manifest
+
+`manifest` prints an mtree-style fingerprint -- one line per path with its type,
+permission bits, uid, gid, size, mtime, and a CRC32 of the file's contents (a
+device node records its major.minor instead):
+
+    f 755 0 2 105246 482562190 97ecb203 /unix
+    d 775 3 3 1632 438221056 - /bin
+    c 666 0 0 0 417829221 17.0 /dev/tty
+
+`verify` walks a second image and reports what differs -- `!` changed, `+` extra
+(in image, not manifest), `-` missing -- and exits nonzero if anything did.  It
+compares type / mode / owner for everything, plus **size + content checksum for
+files** and **major.minor for devices**; it deliberately ignores mtime and does
+not checksum directories (whose on-disk size and entry order legitimately vary),
+so a content-faithful transformation passes clean:
+
+    s5fs manifest reference.dsk > ref.mtree
+    s5fs restore -d rl02 rootdump rebuilt.dsk   # (or any transform)
+    s5fs verify rebuilt.dsk ref.mtree           # exit 0 == every file identical
+
+This is the tool for regression-checking image transforms and for proving a
+rebuilt world byte-matches a reference: a `dump | restore` round-trip of the
+real 2.9 root verifies clean, while a single changed mode, byte, added, or
+removed file is reported.
 
 ## Byte order
 

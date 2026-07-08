@@ -32,6 +32,8 @@ static const struct subcmd {
 	{ "dcheck",  cmd_dcheck,  "directory link-count check"               },
 	{ "clri",    cmd_clri,    "clear (zero) inodes by number"            },
 	{ "fsdb",    cmd_fsdb,    "interactive filesystem debugger (-w to edit)" },
+	{ "manifest",cmd_manifest,"fingerprint an image (path/mode/owner/cksum)" },
+	{ "verify",  cmd_verify,  "diff an image against a manifest"         },
 	{ "boot",    cmd_boot,    "install a boot block into block 0"        },
 	{ "vhd",     cmd_vhd,     "wrap/unwrap a fixed-VHD container"        },
 	{ "ls",      cmd_ls,      "list a directory (-l long, -a all)"       },

@@ -120,6 +120,16 @@ if [ "$sbok" = 1 ] && [ -n "$fino" ] && [ "$uid" = 55 ] && fsck_clean "$T/fdb.ds
 	ok "fsdb inspect + edit (set uid) -> fsck clean"
 else no "fsdb inspect + edit (sb=$sbok ino=$fino uid=$uid)"; fi
 
+# 10f. manifest/verify: an image matches its own manifest; a change is caught
+"$S5" mkfs -d rl02 "$T/mf.dsk" >/dev/null 2>&1
+"$S5" put "$T/mf.dsk" "$T/src" /f >/dev/null 2>&1
+"$S5" mkdir "$T/mf.dsk" /sub >/dev/null 2>&1
+"$S5" manifest "$T/mf.dsk" > "$T/m.txt" 2>/dev/null
+"$S5" verify "$T/mf.dsk" "$T/m.txt" >/dev/null 2>&1; v0=$?
+"$S5" chmod "$T/mf.dsk" 700 /f >/dev/null 2>&1
+"$S5" verify "$T/mf.dsk" "$T/m.txt" >/dev/null 2>&1; v1=$?
+if [ "$v0" -eq 0 ] && [ "$v1" -ne 0 ]; then ok "manifest/verify (clean; catches a change)"; else no "manifest/verify (v0=$v0 v1=$v1)"; fi
+
 # 11. interactive shell drives the engine
 printf 'mkdir sub\ncd sub\nput %s g\nls\nquit\n' "$T/src" | "$S5" shell "$T/a.dsk" >/dev/null 2>&1
 if "$S5" cat "$T/a.dsk" /sub/g 2>/dev/null | grep -q fox && fsck_clean "$T/a.dsk"; then ok "shell session -> fsck clean"; else no "shell session -> fsck clean"; fi

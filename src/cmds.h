@@ -18,6 +18,8 @@ int cmd_icheck(int argc, char **argv);	/* block/free-list check (-s salvage) */
 int cmd_dcheck(int argc, char **argv);	/* directory link-count check     */
 int cmd_clri(int argc, char **argv);	/* clear an inode by number       */
 int cmd_fsdb(int argc, char **argv);	/* interactive filesystem debugger */
+int cmd_manifest(int argc, char **argv);/* mtree-style fingerprint of an image */
+int cmd_verify(int argc, char **argv);	/* diff an image against a manifest    */
 int cmd_boot(int argc, char **argv);	/* install a boot block (block 0) */
 int cmd_vhd(int argc, char **argv);	/* wrap/unwrap a fixed-VHD container */
 

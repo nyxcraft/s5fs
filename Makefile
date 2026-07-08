@@ -11,8 +11,8 @@ SRC     := src
 
 # core multi-tool: `s5fs <command>` (no external dependencies)
 BASE := s5fs.c cmd_mkfs.c cmd_mktree.c cmd_tar.c cmd_restore.c cmd_dump.c \
-        cmd_fsck.c cmd_fs.c cmd_shell.c cmd_vhd.c cmd_util.c s5fs_core.c \
-        s5fs_rw.c tree.c fsread.c device.c s5endian.c
+        cmd_fsck.c cmd_fs.c cmd_shell.c cmd_fsdb.c cmd_vhd.c cmd_util.c \
+        s5fs_core.c s5fs_rw.c tree.c fsread.c device.c s5endian.c
 HDRS := $(SRC)/cmds.h $(SRC)/s5fs_core.h $(SRC)/s5fs_rw.h $(SRC)/tree.h \
         $(SRC)/fsread.h $(SRC)/fsutil.h $(SRC)/pdp11fs.h $(SRC)/device.h \
         $(SRC)/s5endian.h

@@ -22,6 +22,7 @@ bar the cross `as`/`cc` are held to.
     s5fs icheck    block + free-list check (-s salvages the free list)
     s5fs dcheck    directory link-count check
     s5fs clri      clear (zero) inodes by number
+    s5fs fsdb      interactive filesystem debugger (-w to edit)
     s5fs boot      install a primary bootstrap into block 0
     s5fs vhd       wrap/unwrap a fixed-VHD container (wrap/unwrap/info)
 
@@ -151,7 +152,8 @@ single/double/triple-indirect map (files of any size), and after edits
                      1/2/3 indirect), and the mkdir/rm/rename/put/... ops.  Used
                      by cmd_fs.c, cmd_shell.c, AND the FUSE mount -- one copy.
     src/cmd_fs.c     `ls`/`cat`/`get`/`put`/`cp`/`mv`/`rm`/`mkdir`/`rmdir`/`chmod`
-    src/cmd_shell.c  `shell` -- the interactive explorer REPL
+    src/cmd_shell.c  `shell` -- the interactive explorer REPL (paths)
+    src/cmd_fsdb.c   `fsdb`  -- the interactive debugger (raw inodes/blocks)
     src/fsutil.h     small presentation helpers (mode string, path resolve)
     src/cmd_fsck.c   `fsck`   subcommand -- an independent reader/checker.
     src/cmd_mount.c  `mount`/`umount` -- a thin FUSE front-end over s5fs_rw
@@ -391,17 +393,46 @@ reverse.
 
 ## fsck
 
-    s5fs fsck [-B 512|1024|2048] [-A pdp11|le|be] [-l] image
+    s5fs fsck [-B 512|1024|2048] [-A pdp11|le|be] [-l] [-p] image
 
 Decodes the superblock, walks every allocated inode's block tree (direct +
 single/double/triple indirect), traverses the chained free list, confirms the
 volume partitions exactly once into reserved / used / free (what `icheck`
 does), and tallies directory references against each inode's `di_nlink` (what
-`dcheck` does) -- i.e. it folds the classic icheck+dcheck into one checker, as
-4.x/2.9 `fsck` itself did.  `-l` additionally lists the directory tree
-(ncheck-style).  Byte order is auto-detected (override with `-A`).  It shares no
-logic with the writer, so it is a real cross-check of `s5fs mkfs`/`mktree`, and
-it reads any s5fs image in the family below.
+`dcheck` does).  On top of those it runs the classic higher fsck phases:
+
+- **inode sanity** -- inodes with an invalid file type; directory entries that
+  point at an unallocated inode (dangling) or an out-of-range inode; a "."
+  entry that doesn't reference its own directory;
+- **connectivity** -- a DFS from root marks every reachable inode; anything
+  allocated but *un*reachable is an orphan (found by reachability, not link
+  count, since an orphan directory's own "." keeps its count nonzero).
+
+`-p` repairs: fix link counts, salvage the free list, **zero dangling entries**,
+and **reconnect orphans into `/lost+found`** (an orphan directory also gets its
+".." repointed), then recompute link counts from the repaired tree.  `-l` lists
+the directory tree (ncheck-style).  Byte order is auto-detected (`-A` overrides).
+The checker shares no logic with the writer, so it is a real cross-check of
+`s5fs mkfs`/`mktree`, and reads any s5fs image in the family below.
+
+### fsdb -- interactive debugger
+
+    s5fs fsdb [-w] [-B ..] [-A ..] [-d dev -P part | -o blk] image
+
+Where the shell works in the namespace (paths), `fsdb` works at the raw
+inode/block level -- the forensic / repair / learn-the-format tool:
+
+    fsdb> sb                 superblock summary
+    fsdb> inode 2            decode an inode (type, mode, times, block pointers)
+    fsdb> dir 2              raw directory entries (slot / inode / name)
+    fsdb> map 91             an inode's logical->physical block map
+    fsdb> block 27           hexdump a filesystem block
+    fsdb> cat 91 ; path /bin/sh ; links 21
+    fsdb> set 91 uid 0       (-w) patch mode|nlink|uid|gid|size
+    fsdb> poke 27 0 2e       (-w) write raw hex bytes at block/offset
+
+Read-only unless `-w`.  It reuses the same reader and writer core as the rest of
+the tools, so what you see and change is exactly what they see.
 
 ## Byte order
 

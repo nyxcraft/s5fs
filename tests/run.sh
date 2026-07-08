@@ -109,6 +109,17 @@ if [ "$m1" = 207e18fd ] && [ "$m2" = 207e18fd ] && [ "$mv7" = 00000000 ] && fsck
 	ok "SysV superblock (FsMAGIC + rw round-trip; absent by default)"
 else no "SysV superblock (m1=$m1 m2=$m2 v7=$mv7)"; fi
 
+# 10e. fsdb inspects (sb/inode) read-only and edits (-w set) with fsck clean
+"$S5" mkfs -d rl02 "$T/fdb.dsk" >/dev/null 2>&1
+"$S5" put "$T/fdb.dsk" "$T/src" /f >/dev/null 2>&1
+fino=$(printf 'path /f\nquit\n' | "$S5" fsdb "$T/fdb.dsk" 2>/dev/null | grep -oE 'inode [0-9]+' | awk '{print $2}')
+sbok=$(printf 'sb\nquit\n' | "$S5" fsdb "$T/fdb.dsk" 2>/dev/null | grep -c 's_isize')
+printf "set %s uid 55\nquit\n" "$fino" | "$S5" fsdb -w "$T/fdb.dsk" >/dev/null 2>&1
+uid=$("$S5" ls -l "$T/fdb.dsk" /f 2>/dev/null | awk '{print $3}')
+if [ "$sbok" = 1 ] && [ -n "$fino" ] && [ "$uid" = 55 ] && fsck_clean "$T/fdb.dsk"; then
+	ok "fsdb inspect + edit (set uid) -> fsck clean"
+else no "fsdb inspect + edit (sb=$sbok ino=$fino uid=$uid)"; fi
+
 # 11. interactive shell drives the engine
 printf 'mkdir sub\ncd sub\nput %s g\nls\nquit\n' "$T/src" | "$S5" shell "$T/a.dsk" >/dev/null 2>&1
 if "$S5" cat "$T/a.dsk" /sub/g 2>/dev/null | grep -q fox && fsck_clean "$T/a.dsk"; then ok "shell session -> fsck clean"; else no "shell session -> fsck clean"; fi

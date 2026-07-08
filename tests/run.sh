@@ -130,19 +130,19 @@ else no "fsdb inspect + edit (sb=$sbok ino=$fino uid=$uid)"; fi
 "$S5" verify "$T/mf.dsk" "$T/m.txt" >/dev/null 2>&1; v1=$?
 if [ "$v0" -eq 0 ] && [ "$v1" -ne 0 ]; then ok "manifest/verify (clean; catches a change)"; else no "manifest/verify (v0=$v0 v1=$v1)"; fi
 
-# 10g. recover: a deleted name survives, and an a.out start is carved exactly
+# 10g. scavenge: a deleted name survives, and an a.out start is carved exactly
 printf '\010\001\100\000\020\000\000\000\000\000\000\000\000\000\000\000' > "$T/prog"
 head -c 80 /dev/zero 2>/dev/null | tr '\0' 'Z' >> "$T/prog"   # magic 0410, text=64 data=16 -> 96 bytes
 "$S5" mkfs -d rl02 "$T/rc.dsk" >/dev/null 2>&1
 "$S5" put "$T/rc.dsk" "$T/prog" /GONEPROG >/dev/null 2>&1
 "$S5" rm "$T/rc.dsk" /GONEPROG >/dev/null 2>&1
-rname=$("$S5" recover "$T/rc.dsk" 2>/dev/null | grep -c GONEPROG)
-raout=$("$S5" recover "$T/rc.dsk" 2>/dev/null | grep -c 'a.out')
-"$S5" recover -x "$T/rout" "$T/rc.dsk" >/dev/null 2>&1
+rname=$("$S5" scavenge "$T/rc.dsk" 2>/dev/null | grep -c GONEPROG)
+raout=$("$S5" scavenge "$T/rc.dsk" 2>/dev/null | grep -c 'a.out')
+"$S5" scavenge -x "$T/rout" "$T/rc.dsk" >/dev/null 2>&1
 rcarve=no; head -c 96 "$T"/rout/aout-* 2>/dev/null | cmp -s - "$T/prog" && rcarve=yes
 if [ "$rname" -ge 1 ] && [ "$raout" -ge 1 ] && [ "$rcarve" = yes ]; then
-	ok "recover (deleted name + a.out carved exactly)"
-else no "recover (name=$rname aout=$raout carve=$rcarve)"; fi
+	ok "scavenge (deleted name + a.out carved exactly)"
+else no "scavenge (name=$rname aout=$raout carve=$rcarve)"; fi
 
 # 11. interactive shell drives the engine
 printf 'mkdir sub\ncd sub\nput %s g\nls\nquit\n' "$T/src" | "$S5" shell "$T/a.dsk" >/dev/null 2>&1

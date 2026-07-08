@@ -25,7 +25,7 @@ bar the cross `as`/`cc` are held to.
     s5fs fsdb      interactive filesystem debugger (-w to edit)
     s5fs manifest  fingerprint an image (path/mode/owner/size/cksum per file)
     s5fs verify    diff an image against a manifest
-    s5fs recover   undelete: deleted names + carve deleted content (-x to extract)
+    s5fs scavenge  find remnants of deleted files: names + carve (-x to extract)
     s5fs boot      install a primary bootstrap into block 0
     s5fs vhd       wrap/unwrap a fixed-VHD container (wrap/unwrap/info)
 
@@ -158,7 +158,7 @@ single/double/triple-indirect map (files of any size), and after edits
     src/cmd_shell.c  `shell` -- the interactive explorer REPL (paths)
     src/cmd_fsdb.c   `fsdb`  -- the interactive debugger (raw inodes/blocks)
     src/cmd_manifest.c `manifest`/`verify` -- mtree-style fingerprint + diff
-    src/cmd_recover.c `recover` -- deleted-name + signature-carve undelete
+    src/cmd_scavenge.c `scavenge` -- deleted-name + signature-carve remnants
     src/fsutil.h     small presentation helpers (mode string, path resolve)
     src/cmd_fsck.c   `fsck`   subcommand -- an independent reader/checker.
     src/cmd_mount.c  `mount`/`umount` -- a thin FUSE front-end over s5fs_rw
@@ -468,14 +468,15 @@ rebuilt world byte-matches a reference: a `dump | restore` round-trip of the
 real 2.9 root verifies clean, while a single changed mode, byte, added, or
 removed file is reported.
 
-## Recovery / undelete
+## Scavenge (deleted-file remnants)
 
-    s5fs recover [-B ..] [-A ..] [-d dev -P part | -o blk] [-x DIR] image
+    s5fs scavenge [-B ..] [-A ..] [-d dev -P part | -o blk] [-x DIR] image
 
-Traditional Unix `rm` is hostile to undelete -- it clears the directory entry's
-inode number and, on the last link, zeroes the inode (so the block list is gone)
-and frees the blocks -- but it doesn't scrub the data.  `fsck -p` already rescues
-inodes that are still allocated (orphans); `recover` gets what's left:
+This is deliberately **not** an "undelete" -- traditional Unix `rm` makes
+general undelete impossible: it clears the directory entry's inode number and,
+on the last link, zeroes the inode (so the block list is gone) and frees the
+blocks.  `fsck -p` already rescues inodes that are still allocated (orphans);
+`scavenge` gathers the traces `rm` leaves behind:
 
 - **deleted names** -- `rm` clears an entry's inode number but leaves the
   14-byte name, so every removed filename survives as a ghost in its directory;
@@ -483,14 +484,14 @@ inodes that are still allocated (orphans); `recover` gets what's left:
   chain blocks) are scanned for file starts: `a.out` (`0407`/`0410`/`0411`, with
   its declared size), `ar`, `tar`, and text.  With `-x DIR` each is carved out.
 
-Recovery is inherently partial on s5fs, and `recover` is honest about it: the
-inode's block list is gone, blocks are rotationally interleaved (not
-contiguous), and the free list is chained *through* freed blocks -- so ~1 freed
-block in 50 is overwritten with free-list links.  In practice single-block files
-(most config/source and small binaries) come back intact, a deleted `a.out`
-start is carved byte-exact, and a multi-block text file is recovered block by
-block (each block is independently identifiable, though not necessarily
-reassembled in order); large binaries recover only their leading blocks.
+It's honest about the limits: the inode's block list is gone, blocks are
+rotationally interleaved (not contiguous), and the free list is chained
+*through* freed blocks -- so ~1 freed block in 50 is overwritten with free-list
+links.  In practice single-block files (most config/source and small binaries)
+come back intact, a deleted `a.out` start is carved byte-exact, and a multi-block
+text file is recovered block by block (each block is independently identifiable,
+though not necessarily reassembled in order); large binaries recover only their
+leading blocks.  So it's a forensic scavenger, not a guaranteed undelete.
 
 ## Byte order
 

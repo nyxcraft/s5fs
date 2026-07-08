@@ -1,26 +1,27 @@
 /*
- * cmd_recover.c -- `s5fs recover`: forensic recovery of deleted files.
+ * cmd_scavenge.c -- `s5fs scavenge`: pick through the free space for remnants
+ * of deleted files.
  *
- *   s5fs recover [opts] image            report recovery leads
- *   s5fs recover [opts] -x DIR image     also carve recoverable data into DIR
+ *   s5fs scavenge [opts] image            report what can be found
+ *   s5fs scavenge [opts] -x DIR image     also carve recoverable data into DIR
  *
- * Traditional Unix rm is hostile to undelete: it zeroes the directory entry's
- * inode number and, when the last link goes, zeroes the inode itself (so the
- * block map is gone) and returns the data blocks to the free list -- though it
- * does NOT overwrite them.  fsck Phase 3 already rescues inodes that are still
- * allocated (orphans); this recovers what's left:
+ * Deliberately NOT called "undelete": traditional Unix rm makes general
+ * undelete impossible -- it zeroes the directory entry's inode number and, on
+ * the last link, zeroes the inode itself (so the block list is gone) and frees
+ * the data blocks.  fsck Phase 3 already rescues inodes still allocated
+ * (orphans); scavenge gathers the traces rm leaves behind:
  *
  *   1. deleted names  -- rm clears an entry's inode number but leaves the
  *      14-byte NAME, so directory blocks keep a ghost of every removed name.
  *   2. content by signature -- unreferenced blocks are scanned for file starts
  *      (a.out, ar, tar, text); each is evidence of a deleted file, and -x
- *      carves it out.
+ *      carves out what survives.
  *
- * Honest limits: the inode (and thus the block list) is gone, and s5fs lays
- * files out with a rotational interleave, so blocks are NOT contiguous.  A
- * carve therefore reconstructs a single-block file exactly and a multi-block
- * file only as a best-effort contiguous guess (the file's true size is printed
- * from its header so you know what's uncertain).
+ * Honest limits: the block list is gone; s5fs interleaves blocks (not
+ * contiguous); and the free list is chained THROUGH freed blocks, so ~1 in 50
+ * is overwritten with links.  So a single-block file (or a deleted a.out start)
+ * comes back exact, multi-block text recovers block-by-block, and a large
+ * binary yields only its head -- never a guaranteed whole-file undelete.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -62,7 +63,7 @@ static void build_used(void)
 	int32_t nfree, fr[P11_NICFREE];
 	used = calloc(R.fsize, 1);
 	nino = (R.isize - 2) * R.inopb;
-	if (!used) { fprintf(stderr, "s5fs recover: out of memory\n"); exit(1); }
+	if (!used) { fprintf(stderr, "s5fs scavenge: out of memory\n"); exit(1); }
 	for (ino = 1; ino <= nino; ino++) {
 		fsr_inode in;
 		if (fsr_iget(&R, ino, &in) < 0) break;
@@ -173,7 +174,7 @@ static long carve(uint32_t bno, long len, const char *outdir, const char *base)
 	long done = 0;
 	snprintf(path, sizeof path, "%s/%s-blk%u", outdir, base, bno);
 	f = fopen(path, "wb");
-	if (!f) { fprintf(stderr, "s5fs recover: %s: cannot create\n", path); return -1; }
+	if (!f) { fprintf(stderr, "s5fs scavenge: %s: cannot create\n", path); return -1; }
 	while (done < len) {
 		uint32_t cur = bno + (uint32_t)(done / R.bsize);
 		long want = len - done; if (want > (long)R.bsize) want = R.bsize;
@@ -186,7 +187,7 @@ static long carve(uint32_t bno, long len, const char *outdir, const char *base)
 	return done;
 }
 
-int cmd_recover(int argc, char **argv)
+int cmd_scavenge(int argc, char **argv)
 {
 	uint32_t bsize = 0, plen = 0, bno, tally[SIG_N];
 	int forced = -1, c, i;
@@ -198,23 +199,23 @@ int cmd_recover(int argc, char **argv)
 		switch (c) {
 		case 'B': bsize = (uint32_t)strtoul(optarg, NULL, 0); break;
 		case 'A': { s5_endian e = s5_endian_parse(optarg);
-		            if (e == S5_NENDIAN) { fprintf(stderr, "recover: bad -A\n"); return 2; }
+		            if (e == S5_NENDIAN) { fprintf(stderr, "scavenge: bad -A\n"); return 2; }
 		            forced = (int)e; break; }
 		case 'd': dev = optarg; break;
 		case 'P': part = optarg[0]; break;
 		case 'o': ospec = optarg; break;
 		case 'x': outdir = optarg; break;
-		default: fprintf(stderr, "usage: s5fs recover [-B ..] [-A ..] [-d dev -P part | -o blk] [-x DIR] image\n"); return 2;
+		default: fprintf(stderr, "usage: s5fs scavenge [-B ..] [-A ..] [-d dev -P part | -o blk] [-x DIR] image\n"); return 2;
 		}
 	}
 	if (device_resolve_part(dev, part, ospec, &base, &plen) < 0) return 2;
-	if (optind != argc - 1) { fprintf(stderr, "usage: s5fs recover [...] [-x DIR] image\n"); return 2; }
+	if (optind != argc - 1) { fprintf(stderr, "usage: s5fs scavenge [...] [-x DIR] image\n"); return 2; }
 	if (fsr_open(&R, argv[optind], bsize, forced, base) < 0) {
-		fprintf(stderr, "s5fs recover: %s: not a readable s5fs image (try -B/-A)\n", argv[optind]);
+		fprintf(stderr, "s5fs scavenge: %s: not a readable s5fs image (try -B/-A)\n", argv[optind]);
 		return 1;
 	}
 	if (outdir && mkdir(outdir, 0755) < 0 && access(outdir, W_OK) < 0) {
-		fprintf(stderr, "s5fs recover: %s: cannot use output dir\n", outdir);
+		fprintf(stderr, "s5fs scavenge: %s: cannot use output dir\n", outdir);
 		fsr_close(&R); return 1;
 	}
 

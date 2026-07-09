@@ -162,6 +162,15 @@ else no "analysis (df=$dfok quot=$qok ncheck=$sok du=$duok label=$lok)"; fi
 printf 'mkdir sub\ncd sub\nput %s g\nls\nquit\n' "$T/src" | "$S5" shell "$T/a.dsk" >/dev/null 2>&1
 if "$S5" cat "$T/a.dsk" /sub/g 2>/dev/null | grep -q fox && fsck_clean "$T/a.dsk"; then ok "shell session -> fsck clean"; else no "shell session -> fsck clean"; fi
 
+# 11b. shell multi-mount: cp a file between two different images
+"$S5" mkfs -d rl02 "$T/ma.dsk" >/dev/null 2>&1
+"$S5" mkfs -d rl02 "$T/mb.dsk" >/dev/null 2>&1
+"$S5" put "$T/ma.dsk" "$T/src" /x >/dev/null 2>&1
+printf 'mount %s /a\nmount %s /b\ncp /a/x /b/y\nquit\n' "$T/ma.dsk" "$T/mb.dsk" | "$S5" shell >/dev/null 2>&1
+if "$S5" cat "$T/mb.dsk" /y 2>/dev/null | cmp -s - "$T/src" && fsck_clean "$T/ma.dsk" && fsck_clean "$T/mb.dsk"; then
+	ok "shell multi-mount cross-image cp"
+else no "shell multi-mount cross-image cp"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

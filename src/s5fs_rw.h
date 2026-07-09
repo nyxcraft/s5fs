@@ -52,6 +52,7 @@ long rw_pwrite  (RW *h, uint32_t ino, const void *buf, long size, long off);
 int  rw_truncate(RW *h, uint32_t ino, long len);
 int  rw_put_fd  (RW *h, const char *path, int srcfd, unsigned perm, int32_t mtime);
 int  rw_copy    (RW *h, const char *src, const char *dst);   /* image -> image */
+int  rw_copy_between(RW *sh, const char *src, RW *dh, const char *dst); /* across images */
 
 /* mid-level, for the FUSE random-write path */
 void     rw_ino_loc(RW *h, uint32_t ino, uint32_t *blk, uint32_t *off);

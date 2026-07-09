@@ -47,7 +47,7 @@ bar the cross `as`/`cc` are held to.
     s5fs chmod     change permission bits (octal)
     s5fs chown     change owner (uid[:gid])
     s5fs chgrp     change group (gid)
-    s5fs shell     interactive explorer (cd/ls/get/put/rm/...)
+    s5fs shell     interactive explorer; mount many images, cp between them
 
     s5fs devices   list known disk types (`devices <name>` shows its partitions)
     s5fs mount     FUSE-mount an image (-w for read-write)  (`make FUSE=1`)
@@ -101,25 +101,31 @@ file's mtime.  Example:
     s5fs ls -l disk.dsk /src
     s5fs get  disk.dsk /src/hello.c -      # to stdout
 
-### Interactive explorer
+### Interactive explorer (with a mount table)
 
-    s5fs shell [-r] [-B 512|1024|2048] [-A pdp11|le|be] image
+    s5fs shell [-r] [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] [image]
 
-A small REPL with a current directory inside the image (read-write unless `-r`):
+A REPL that **mounts any number of disks/partitions at paths in one namespace**,
+then lets you do natural file operations -- so `cp` between two different images
+just works, because each path is routed to whichever image is mounted there
+(deepest mountpoint wins, so overlapping mounts behave like real Unix).  A launch
+`image` is auto-mounted at `/`; with no image you start empty and `mount` as you go.
 
-    $ s5fs shell disk.dsk
-    s5fs shell: disk.dsk (pdp11, 1024-byte blocks, read-write)
-    /> mkdir src
-    /> cd src
-    /src> put ../hello.c
-    /src> ls -l
-    -rw-r--r--  1    0    0      812 2026-07-08 14:40 hello.c
-    /src> cat hello.c
-    ...
-    /src> quit
+    $ s5fs shell
+    /> mount root.dsk /root
+    /> mount -d rp06 -P c usr.dsk /root/usr      # a partition, mounted deeper
+    /> mounts
+      /root            root.dsk  (rw)
+      /root/usr        usr.dsk   (rw)
+    /> cp /root/etc/passwd /root/usr/tmp/passwd  # copy BETWEEN two images
+    /> cp @./local.c /root/src/local.c           # '@' prefix = a host path
+    /> quit
 
-Commands: `ls [-l] [-a]`, `cd`, `pwd`, `cat`, `get`, `put`, `cp`, `mv`, `rm`,
-`mkdir`, `rmdir`, `chmod`, `chown`, `chgrp`, `stat`, `help`, `quit`/`exit`.
+Commands: `mount`, `umount`, `mounts`; `ls [-l] [-a]`, `cd`, `pwd`, `cat`, `stat`;
+`cp [@]src [@]dst`, `mv src dst`, `get`, `put`; `rm`, `mkdir`, `rmdir`, `chmod`,
+`chown`, `chgrp`; `help`, `quit`.  Each mount is read/write unless mounted `-r`
+(a write to a read-only mount just returns "Read-only file system"); `cp` reaches
+the host with an `@` prefix on either side.
 
 ## Mounting (FUSE)
 
@@ -614,5 +620,6 @@ and run under `apsim`, for a fully third-party oracle.
 
 - optional: preserve host directory/device-node times in `mktree` (regular
   files already do)
-- optional: a one-shot `cp` between two disk images (host `@` syntax already in
-  place; multi-image addressing is the remaining piece)
+
+(Copying between two disk images is done -- mount both in `s5fs shell` and `cp`
+across, or use `cp @host`/`get`/`put` for host transfers.)

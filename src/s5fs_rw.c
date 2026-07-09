@@ -622,40 +622,44 @@ int rw_put_fd(RW *h, const char *path, int srcfd, unsigned perm, int32_t mtime)
 }
 
 /* copy a regular file `src` to `dst`, both inside the image */
-int rw_copy(RW *h, const char *src, const char *dst)
+/* copy a regular file from src handle `sh` (path `src`) to dst handle `dh`
+ * (path `dst`); sh and dh may be the same image or two different ones */
+int rw_copy_between(RW *sh, const char *src, RW *dh, const char *dst)
 {
 	uint32_t sino, dino;
 	fsr_inode sin;
 	long off = 0;
 	uint8_t buf[65536];
 
-	if (!h->writable) return -EROFS;
-	sino = fsr_namei(&h->r, src); if (!sino) return -ENOENT;
-	if (fsr_iget(&h->r, sino, &sin) < 0) return -EIO;
+	if (!dh->writable) return -EROFS;
+	sino = fsr_namei(&sh->r, src); if (!sino) return -ENOENT;
+	if (fsr_iget(&sh->r, sino, &sin) < 0) return -EIO;
 	if ((sin.mode & P11_IFMT) == P11_IFDIR) return -EISDIR;
 	if ((sin.mode & P11_IFMT) != P11_IFREG) return -EPERM;
 
-	dino = fsr_namei(&h->r, dst);
+	dino = fsr_namei(&dh->r, dst);
 	if (dino) {
 		fsr_inode din;
-		if (fsr_iget(&h->r, dino, &din) < 0) return -EIO;
+		if (fsr_iget(&dh->r, dino, &din) < 0) return -EIO;
 		if ((din.mode & P11_IFMT) == P11_IFDIR) return -EISDIR;
 		if ((din.mode & P11_IFMT) != P11_IFREG) return -EPERM;
-		rw_truncate(h, dino, 0);
+		rw_truncate(dh, dino, 0);
 	} else {
-		int rc = rw_creat(h, dst, sin.mode & 07777, &dino);
+		int rc = rw_creat(dh, dst, sin.mode & 07777, &dino);
 		if (rc < 0) return rc;
 	}
 	while (off < sin.size) {
 		long want = sin.size - off; long w;
 		if (want > (long)sizeof buf) want = sizeof buf;
-		if (fsr_readfile(&h->r, &sin, buf, want, off) != want) return -EIO;
-		w = rw_pwrite(h, dino, buf, want, off);
+		if (fsr_readfile(&sh->r, &sin, buf, want, off) != want) return -EIO;
+		w = rw_pwrite(dh, dino, buf, want, off);
 		if (w < 0) return (int)w;
 		if (w < want) return -ENOSPC;
 		off += want;
 	}
-	set_meta(h, dino, sin.mode & 07777, sin.atime, sin.mtime);
-	rw_sync(h);
+	set_meta(dh, dino, sin.mode & 07777, sin.atime, sin.mtime);
+	rw_sync(dh);
 	return 0;
 }
+
+int rw_copy(RW *h, const char *src, const char *dst) { return rw_copy_between(h, src, h, dst); }

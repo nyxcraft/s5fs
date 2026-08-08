@@ -357,11 +357,16 @@ ftruncate.)</li>
 <li><strong>Orphan <em>directories</em> aren't linkcount-0.</strong> A directory always has <code>nlink ≥ 1</code>
 from its own <code>.</code>, so fsck Phase 3 detects orphaned directories by
 <strong>reachability DFS from root</strong>, not by <code>nlink == 0</code>. Keep it.</li>
-<li><strong>Times stamped &quot;now&quot; (LIVE ISSUE / deferred).</strong> mktree currently does <em>not</em>
-preserve host directory / device-node mtimes in all paths — the atime/mtime/
-ctime plumbing exists and works for files, but finishing full time-preservation
-in <code>mktree</code> for dirs/devnodes was explicitly deferred, not done. If you touch
-mktree, this is the first thing to finish.</li>
+<li><strong>Times stamped &quot;now&quot; (FIXED).</strong> <code>mktree</code> used to preserve regular files'
+times while stamping every <em>directory</em> with the filesystem's creation time, so
+a tree built from a 1980s source came back with correct file dates and every
+directory dated today. <code>write_dir</code> now carries at/mt/ctime and the host walk
+passes the <code>stat</code> it was already doing. Synthesized directories (<code>lost+found</code>,
+a <code>-D</code>-built <code>/dev</code>) still pass 0, which means &quot;stamp with the superblock
+time&quot; and so honours <code>-t</code> — correct, as they correspond to nothing on the
+host. Note mktree never stores a <em>host</em> device node at all (non-regular,
+non-directory files are skipped and counted), so there is no devnode time to
+preserve; those come only from <code>-D</code> and take the filesystem's time.</li>
 <li><strong><code>scavenge</code> is honest, not magic.</strong> Because the free list is chained <em>through</em>
 freed blocks (~1 in 50 gets overwritten by the chain itself) and files aren't
 contiguous, real undelete is impossible. <code>scavenge</code> recovers <strong>deleted names</strong>

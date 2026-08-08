@@ -214,10 +214,17 @@ store_regfile(S5FS *fs, const char *host, uint32_t ino, mode_t hmode)
 	g_files++;
 }
 
-/* write a directory inode from an in-memory entry list */
+/* Write a directory inode from an in-memory entry list.
+ *
+ * at/mt/ct are the host directory's times; 0 means "stamp with the superblock
+ * time", which is what the synthesized directories (lost+found, /dev) want
+ * since they correspond to nothing on the host.  Regular files have preserved
+ * their times since the beginning -- directories did not, so a tree restored
+ * from a 1980s source came back with every directory dated today. */
 static void
 write_dir(S5FS *fs, uint32_t ino, uint32_t parent, uint16_t mode,
-	  int16_t nlink, const uint16_t *cino, char (*cnm)[16], uint32_t nc)
+	  int16_t nlink, const uint16_t *cino, char (*cnm)[16], uint32_t nc,
+	  int32_t at, int32_t mt, int32_t ct)
 {
 	s5fs_inode in;
 	uint32_t nent = nc + 2, len = nent * P11_DIRENTSZ, i;
@@ -242,6 +249,9 @@ write_dir(S5FS *fs, uint32_t ino, uint32_t parent, uint16_t mode,
 	in.number = (uint16_t)ino;
 	in.mode = mode;
 	in.nlink = nlink;
+	in.atime = at;
+	in.mtime = mt;
+	in.ctime = ct;
 	store_bytes(fs, &in, db, len);
 	s5fs_writeinode(fs, &in);
 	free(db);
@@ -266,7 +276,7 @@ store_devnode(S5FS *fs, uint32_t ino, int isblk, int maj, int min_, unsigned mod
 static void
 build_lostfound(S5FS *fs, uint32_t ino, uint32_t parent)
 {
-	write_dir(fs, ino, parent, (uint16_t)(P11_IFDIR | 0700), 2, NULL, NULL, 0);
+	write_dir(fs, ino, parent, (uint16_t)(P11_IFDIR | 0700), 2, NULL, NULL, 0, 0, 0, 0);
 }
 
 /* build /dev from a spec file: lines "name c|b major minor [octal-mode]" */
@@ -287,7 +297,7 @@ build_devdir(S5FS *fs, uint32_t ino, uint32_t parent, const char *spec)
 
 	if (!f) {
 		fprintf(stderr, "s5fs mktree: %s: %s (no /dev nodes)\n", spec, strerror(errno));
-		write_dir(fs, ino, parent, (uint16_t)(P11_IFDIR | 0755), 2, NULL, NULL, 0);
+		write_dir(fs, ino, parent, (uint16_t)(P11_IFDIR | 0755), 2, NULL, NULL, 0, 0, 0, 0);
 		return;
 	}
 	while (fgets(line, sizeof line, f)) {
@@ -331,7 +341,7 @@ build_devdir(S5FS *fs, uint32_t ino, uint32_t parent, const char *spec)
 	}
 	fclose(f);
 
-	write_dir(fs, ino, parent, (uint16_t)(P11_IFDIR | 0755), 2, cino, cnm, (uint32_t)nn);
+	write_dir(fs, ino, parent, (uint16_t)(P11_IFDIR | 0755), 2, cino, cnm, (uint32_t)nn, 0, 0, 0);
 	for (i = 0; i < nn; i++)
 		store_devnode(fs, nodes[i].ino, nodes[i].isblk, nodes[i].maj, nodes[i].min_, nodes[i].mode);
 	free(nodes);
@@ -482,10 +492,19 @@ build_dir(S5FS *fs, const char *host, uint32_t ino, uint32_t parent,
 		strncpy(cnm[i], kids[i].nm, 15);
 		cnm[i][15] = '\0';
 	}
-	if (stat(host, &st) < 0)
-		st.st_mode = 0755;
-	write_dir(fs, ino, parent, (uint16_t)(P11_IFDIR | (st.st_mode & 07777)),
-		  (int16_t)(2 + nsub), cino, cnm, (uint32_t)nk);
+	{
+		int32_t dat = 0, dmt = 0, dct = 0; /* 0 => stamp with the fs time */
+		if (stat(host, &st) < 0) {
+			st.st_mode = 0755;
+		}
+		else {
+			dat = (int32_t)st.st_atime;
+			dmt = (int32_t)st.st_mtime;
+			dct = (int32_t)st.st_ctime;
+		}
+		write_dir(fs, ino, parent, (uint16_t)(P11_IFDIR | (st.st_mode & 07777)),
+			  (int16_t)(2 + nsub), cino, cnm, (uint32_t)nk, dat, dmt, dct);
+	}
 	free(cino);
 	free(cnm);
 

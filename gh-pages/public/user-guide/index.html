@@ -308,9 +308,11 @@ s5fs mkdir -p img.dsk /usr/local/bin
 s5fs tar c img.dsk backup.tar             # image → tar
 s5fs tar x -d rl02 backup.tar new.dsk     # tar → fresh image
 </code></pre>
-<p><code>mktree</code> preserves host file times. It does <strong>not</strong> currently preserve
-directory and device-node times — those are stamped with the filesystem's
-creation time. This is the one known gap.</p>
+<p><code>mktree</code> preserves host times for <strong>files and directories</strong> alike. The entries
+it synthesizes rather than copies — <code>lost+found</code>, and a <code>/dev</code> built from <code>-D</code> —
+are stamped with the filesystem's time, which <code>-t</code> sets; they correspond to
+nothing on the host, so there is no time to preserve. Host device nodes are not
+stored at all (they are skipped and counted in the summary).</p>
 <hr />
 <h2 id="5-the-interactive-shell">5. The interactive shell</h2>
 <p><code>s5fs shell</code> is not a single-image browser — it is a small VFS with a mount

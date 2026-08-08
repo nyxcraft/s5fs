@@ -132,9 +132,11 @@ s5fs tar c img.dsk backup.tar             # image → tar
 s5fs tar x -d rl02 backup.tar new.dsk     # tar → fresh image
 ```
 
-`mktree` preserves host file times. It does **not** currently preserve
-directory and device-node times — those are stamped with the filesystem's
-creation time. This is the one known gap.
+`mktree` preserves host times for **files and directories** alike. The entries
+it synthesizes rather than copies — `lost+found`, and a `/dev` built from `-D` —
+are stamped with the filesystem's time, which `-t` sets; they correspond to
+nothing on the host, so there is no time to preserve. Host device nodes are not
+stored at all (they are skipped and counted in the summary).
 
 ---
 

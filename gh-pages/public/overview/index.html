@@ -665,12 +665,11 @@ real 2.9 root; INI-defined tables (<code>s5fs devices eagle</code>) work too.</l
 <p>Still planned: a self-hosted <code>icheck</code>/<code>fsck</code> built with our own cross-toolchain
 and run under <code>apsim</code>, for a fully third-party oracle.</p>
 <h2 id="roadmap">Roadmap</h2>
-<ul>
-<li>optional: preserve host directory/device-node times in <code>mktree</code> (regular
-files already do)</li>
-</ul>
-<p>(Copying between two disk images is done -- mount both in <code>s5fs shell</code> and <code>cp</code>
-across, or use <code>cp @host</code>/<code>get</code>/<code>put</code> for host transfers.)</p>
+<p>Nothing outstanding.</p>
+<p>(Directory time preservation in <code>mktree</code> is done -- host directories keep their
+own times, and the synthesized <code>lost+found</code>/<code>/dev</code> take the filesystem's time,
+which <code>-t</code> sets.  Copying between two disk images is done -- mount both in
+<code>s5fs shell</code> and <code>cp</code> across, or use <code>cp @host</code>/<code>get</code>/<code>put</code> for host transfers.)</p>
 <h2 id="license">License</h2>
 <p>BSD 3-Clause -- see <a href="https://github.com/nyxcraft/s5fs/blob/main/LICENSE">LICENSE</a>.  The tree is original C; the writer core
 is a host port of 2.9BSD's <code>mkfs.c</code> and the structural constants come from the

@@ -461,6 +461,12 @@ nonzero value as verbatim. That one rule is what lets <code>restore</code>, <cod
 <code>mktree</code> preserve real 1980s dates instead of rewriting history to the moment
 the image was built. It is an invariant, not a convenience — see
 <a href="../design/index.html"><code>design.md</code></a> §5.</p>
+<p>The rule also gives synthesized entries the right answer for free: <code>lost+found</code>
+and a <code>-D</code>-built <code>/dev</code> pass 0 and so take the filesystem's time (which <code>-t</code>
+sets), while anything copied from the host passes the host's own value. <code>mktree</code>
+got this wrong for directories for a long time — it passed nothing, so every
+directory in a restored 1980s tree was dated the day the image was built, beside
+files dated correctly.</p>
 <hr />
 <h2 id="4-the-block-map">4. The block map</h2>
 <p><code>di_addr</code> slots are read as: <code>laddr</code> direct, then single, double, and triple

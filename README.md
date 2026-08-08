@@ -640,11 +640,12 @@ and run under `apsim`, for a fully third-party oracle.
 
 ## Roadmap
 
-- optional: preserve host directory/device-node times in `mktree` (regular
-  files already do)
+Nothing outstanding.
 
-(Copying between two disk images is done -- mount both in `s5fs shell` and `cp`
-across, or use `cp @host`/`get`/`put` for host transfers.)
+(Directory time preservation in `mktree` is done -- host directories keep their
+own times, and the synthesized `lost+found`/`/dev` take the filesystem's time,
+which `-t` sets.  Copying between two disk images is done -- mount both in
+`s5fs shell` and `cp` across, or use `cp @host`/`get`/`put` for host transfers.)
 
 ## License
 

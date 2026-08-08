@@ -173,6 +173,13 @@ nonzero value as verbatim. That one rule is what lets `restore`, `tar x`, and
 the image was built. It is an invariant, not a convenience — see
 [`design.md`](design.md) §5.
 
+The rule also gives synthesized entries the right answer for free: `lost+found`
+and a `-D`-built `/dev` pass 0 and so take the filesystem's time (which `-t`
+sets), while anything copied from the host passes the host's own value. `mktree`
+got this wrong for directories for a long time — it passed nothing, so every
+directory in a restored 1980s tree was dated the day the image was built, beside
+files dated correctly.
+
 ---
 
 ## 4. The block map

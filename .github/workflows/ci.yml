@@ -1,0 +1,78 @@
+name: CI
+
+# Builds the toolkit and runs tests/run.sh (27 checks, self-contained -- it builds its own
+# fixtures and needs no historical 2.9BSD data, so it runs anywhere).
+#
+# Two project claims are enforced here rather than trusted:
+#
+#   - "-pedantic clean, C99, no GCC-isms" (HANDOFF.md §5, invariant 8). The Makefile's default
+#     CFLAGS are warning-flagged but not fatal, so CI overrides them with -Werror: a warning
+#     fails the build instead of scrolling past. Both gcc and clang, because each sees things
+#     the other does not.
+#   - "host-agnostic ... the tool runs on any modern host". macOS is in the matrix so that is
+#     tested and not merely asserted.
+#
+# The FUSE job covers the one optional build path (`make FUSE=1`), which is otherwise never
+# compiled by anything -- a break there is invisible until someone tries to mount an image.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.cc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, cc: gcc }
+          - { os: ubuntu-latest, cc: clang }
+          - { os: macos-latest,  cc: clang }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build (warnings are errors)
+        run: make CC=${{ matrix.cc }} CFLAGS="-std=c99 -O2 -Wall -Wextra -pedantic -Werror"
+
+      - name: Test
+        run: make CC=${{ matrix.cc }} test
+
+  fuse:
+    name: ubuntu-latest / FUSE=1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install libfuse3
+        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev pkg-config
+
+      - name: Build with FUSE (warnings are errors)
+        run: make FUSE=1 CFLAGS="-std=c99 -O2 -Wall -Wextra -pedantic -Werror"
+
+      - name: mount/umount are actually present
+        run: |
+          ./bin/s5fs help 2>&1 | grep -qE '^  mount ' || {
+            echo "::error::FUSE=1 built but the mount subcommand is missing"; exit 1; }
+
+      - name: Test
+        run: make FUSE=1 test

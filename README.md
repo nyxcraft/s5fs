@@ -1,11 +1,10 @@
 # s5fs -- 2.9BSD-family disk-image tools
 
 A single host multi-tool for building and inspecting the traditional PDP-11
-Unix filesystem (retroactively **s5fs**) as SIMH `.dsk` images -- the final link
-in the "rebuild 2.9BSD from source to a bootable image" pipeline this toolchain
-serves.  It is release-agnostic: one filesystem writer covers **V7, 2.8, 2.9,
-and 2.10** (see the compatibility note below), because they share the s5fs
-on-disk format byte-for-byte.
+Unix filesystem (retroactively **s5fs**) as SIMH `.dsk` images.  It is
+release-agnostic: one filesystem writer covers **V7, 2.8, 2.9, and 2.10** (see
+the compatibility note below), because they share the s5fs on-disk format
+byte-for-byte.
 
 Everything sits on one faithful C99 port of 2.9BSD's filesystem writer, so the
 images are the ones the era's own `fsck`/kernel expect -- the same byte-fidelity

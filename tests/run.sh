@@ -465,20 +465,22 @@ else no "restore checksums (ok=$ckok bad=$ckbad saw=$cksaw force=$ckf forceclean
 
 # 25. mktree preserved regular files' times but stamped every DIRECTORY with the
 #     filesystem's creation time, so a tree built from a 1980s source came back
-#     with its files dated correctly and every directory dated today.  Fields:
-#     type mode uid gid size mtime cksum path.
+#     with its files dated correctly and every directory dated today.
+#     Compared RELATIVELY, not against a fixed epoch: `touch -t` reads local
+#     time, so a hardcoded value passes in one timezone and fails in another.
+#     What matters is that host entries share the HOST's time and differ from
+#     the filesystem's, which -t pins to a known value.
+#     Manifest fields: type mode uid gid size mtime cksum path.
 mkdir -p "$T/tt/old/deep"
 echo hello > "$T/tt/old/f"
 touch -t 198406151200 "$T/tt/old/deep" "$T/tt/old/f" "$T/tt/old" "$T/tt"
 "$S5" mktree -d rl02 -t 500000000 "$T/tt" "$T/tt.dsk" >/dev/null 2>&1
-ttroot=$("$S5" manifest "$T/tt.dsk" 2>/dev/null | awk '$8 == "/"          {print $6}')
-ttdir=$( "$S5" manifest "$T/tt.dsk" 2>/dev/null | awk '$8 == "/old"       {print $6}')
-ttdeep=$("$S5" manifest "$T/tt.dsk" 2>/dev/null | awk '$8 == "/old/deep"  {print $6}')
-ttfile=$("$S5" manifest "$T/tt.dsk" 2>/dev/null | awk '$8 == "/old/f"     {print $6}')
-ttlf=$(  "$S5" manifest "$T/tt.dsk" 2>/dev/null | awk '$8 == "/lost+found" {print $6}')
-# host dirs and files keep 1984; the synthesized lost+found takes the fs time (-t)
-if [ "$ttroot" = 456163200 ] && [ "$ttdir" = 456163200 ] && [ "$ttdeep" = 456163200 ] &&
-   [ "$ttfile" = 456163200 ] && [ "$ttlf" = 500000000 ] && fsck_clean "$T/tt.dsk"; then
+ttm() { "$S5" manifest "$T/tt.dsk" 2>/dev/null | awk -v p="$1" '$8 == p {print $6}'; }
+ttfile=$(ttm /old/f)
+ttroot=$(ttm /); ttdir=$(ttm /old); ttdeep=$(ttm /old/deep); ttlf=$(ttm /lost+found)
+if [ -n "$ttfile" ] && [ "$ttfile" -lt 600000000 ] &&
+   [ "$ttroot" = "$ttfile" ] && [ "$ttdir" = "$ttfile" ] && [ "$ttdeep" = "$ttfile" ] &&
+   [ "$ttlf" = 500000000 ] && [ "$ttfile" != 500000000 ] && fsck_clean "$T/tt.dsk"; then
 	ok "mktree preserves host directory times"
 else no "mktree preserves directory times (root=$ttroot dir=$ttdir deep=$ttdeep file=$ttfile lf=$ttlf)"; fi
 

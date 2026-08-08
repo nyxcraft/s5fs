@@ -642,3 +642,10 @@ and run under `apsim`, for a fully third-party oracle.
 
 (Copying between two disk images is done -- mount both in `s5fs shell` and `cp`
 across, or use `cp @host`/`get`/`put` for host transfers.)
+
+## License
+
+BSD 3-Clause -- see [LICENSE](LICENSE).  The tree is original C; the writer core
+is a host port of 2.9BSD's `mkfs.c` and the structural constants come from the
+2.9BSD headers, so the license also records that derivation and the Caldera
+ancient-Unix terms covering the underlying Research Unix content.

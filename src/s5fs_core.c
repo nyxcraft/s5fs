@@ -324,7 +324,7 @@ s5fs_setblocks(S5FS *fs, s5fs_inode *in, const int32_t *da, uint32_t n)
 	if (!rest)
 		return 0;
 
-	cap = per; /* single indirect */
+	cap = P11_LEVEL_CAP(per, 1); /* single indirect */
 	c = rest < cap ? rest : cap;
 	in->addr[fs->laddr] = s5fs_build_ind(fs, p, c, 1);
 	p += c;
@@ -332,7 +332,7 @@ s5fs_setblocks(S5FS *fs, s5fs_inode *in, const int32_t *da, uint32_t n)
 	if (!rest)
 		return 0;
 
-	cap = per * per; /* double indirect */
+	cap = P11_LEVEL_CAP(per, 2); /* double indirect */
 	c = rest < cap ? rest : cap;
 	in->addr[fs->laddr + 1] = s5fs_build_ind(fs, p, c, 2);
 	p += c;
@@ -340,7 +340,7 @@ s5fs_setblocks(S5FS *fs, s5fs_inode *in, const int32_t *da, uint32_t n)
 	if (!rest)
 		return 0;
 
-	cap = per * per * per; /* triple indirect */
+	cap = P11_LEVEL_CAP(per, 3); /* triple indirect */
 	c = rest < cap ? rest : cap;
 	in->addr[fs->laddr + 2] = s5fs_build_ind(fs, p, c, 3);
 	rest -= c;

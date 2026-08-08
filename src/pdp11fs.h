@@ -45,6 +45,22 @@
 #define P11_MAXBSIZE	2048	/* largest block size we support       */
 #define P11_MAXNINDIR	(P11_MAXBSIZE / 4)	/* daddr_t per indirect block */
 
+/* Blocks reachable through ONE di_addr slot at indirection level L
+ * (1 = single, 2 = double, 3 = triple): nindir^L.
+ *
+ * The levels are laid out SEQUENTIALLY -- the direct slots, then single, then
+ * double after it, then triple -- so the writer's fill order (s5fs_setblocks)
+ * and the reader's routing (fsr_lbn_route) are exact inverses.  They are in
+ * different files on purpose: the read and write sides share no logic, which is
+ * what makes fsck a genuine cross-check of mkfs.  But the level SIZES are a
+ * structural fact, not logic, so both take them from here -- they drifted once,
+ * and every file past ~8 MB (512-byte blocks) read back corrupt while fsck
+ * still called the image clean. */
+#define P11_LEVEL_CAP(nindir, L) \
+	((L) == 1 ? (uint32_t)(nindir)                                    \
+	 : (L) == 2 ? (uint32_t)(nindir) * (uint32_t)(nindir)              \
+		    : (uint32_t)(nindir) * (uint32_t)(nindir) * (uint32_t)(nindir))
+
 /* Logical block sizes s5fs allows: 512 (V7), 1024 (2.x BSD UCB), 2048 (SysV
  * Fs4b).  2048 is the family maximum -- the superblock's block-size code only
  * defines up to Fs4b; bigger blocks are FFS, a different filesystem. */

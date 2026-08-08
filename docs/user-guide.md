@@ -42,7 +42,7 @@ decodes sanely under the right codec.
 | `mkfs` | create a filesystem image |
 | `mktree` | build an image from a host directory tree |
 | `tar c` / `tar x` | image → tar archive, and tar → image (reads `.gz`/`.bz2`/`.Z`) |
-| `restore` | restore a 2.9BSD dump tape into an image |
+| `restore` | restore a 2.9BSD dump tape into an image (`-f` past a bad checksum) |
 | `dump` | write a 2.9BSD dump tape from an image (`-T` for SIMH `.tap`) |
 | `boot` | install a bootstrap into block 0 |
 | `vhd` | wrap / unwrap / describe a fixed-VHD container |

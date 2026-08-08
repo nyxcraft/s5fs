@@ -445,6 +445,24 @@ if [ "$nfsaw" = 200 ] && [ "$nfbad" -eq 0 ] && tmo 30 "$S5" fsck -p -B 512 "$T/n
 	ok "out-of-range s_nfree does not walk off the free-block cache"
 else no "out-of-range s_nfree (nfree=$nfsaw bad=$nfbad)"; fi
 
+# 24. restore now verifies the per-record checksum that dump writes and native
+#     restor(8) checks.  A damaged tape used to be parsed as though sound: the
+#     counts and offsets from a corrupt record drove everything downstream.
+"$S5" mkfs -B 512 -b 4000 "$T/ck.dsk" >/dev/null 2>&1
+"$S5" put -B 512 "$T/ck.dsk" "$T/src" /f >/dev/null 2>&1
+"$S5" dump -B 512 "$T/ck.dsk" "$T/ck.dump" >/dev/null 2>&1
+"$S5" restore -B 512 -b 4000 "$T/ck.dump" "$T/ck.ok" >/dev/null 2>&1; ckok=$?
+cp "$T/ck.dump" "$T/ck.bad"
+printf '\052' | dd of="$T/ck.bad" bs=1 seek=$((5 * 512 + 40)) conv=notrunc 2>/dev/null
+"$S5" restore -B 512 -b 4000 "$T/ck.bad" "$T/ck.b1" >/dev/null 2>&1;    ckbad=$?
+cksaw=$("$S5" restore -B 512 -b 4000 "$T/ck.bad" "$T/ck.b1" 2>&1 | grep -c 'bad record checksum')
+"$S5" restore -f -B 512 -b 4000 "$T/ck.bad" "$T/ck.b2" >/dev/null 2>&1; ckf=$?
+ckfok=0; fsck_clean -B 512 "$T/ck.b2" && ckfok=1
+if [ "$ckok" -eq 0 ] && [ "$ckbad" -ne 0 ] && [ "$cksaw" -ge 1 ] &&
+   [ "$ckf" -ne 0 ] && [ "$ckfok" -eq 1 ] && fsck_clean -B 512 "$T/ck.ok"; then
+	ok "restore verifies record checksums (-f salvages anyway)"
+else no "restore checksums (ok=$ckok bad=$ckbad saw=$cksaw force=$ckf forceclean=$ckfok)"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

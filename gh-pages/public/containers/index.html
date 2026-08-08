@@ -117,6 +117,12 @@ tape; the <code>spcl</code> fields and the embedded dinode go out through the sa
 the image was read with. Metadata and data copy through verbatim, so
 <code>dump | restore</code> is a faithful round-trip and a tape from a PDP-11 image is
 readable by a real PDP-11.</p>
+<p><strong><code>restore</code> verifies the checksum on every header record.</strong> It did not, once,
+and a damaged tape was parsed as though it were sound — the counts and offsets
+taken from a corrupt record then drove everything downstream. A mismatch now
+stops the restore and names the offset; <code>restore -f</code> continues anyway, for
+salvaging what a damaged tape still holds, and exits non-zero either way so a
+script can tell.</p>
 <h3 id="what-restore-skips">What restore skips</h3>
 <p>Our own <code>s5fs restore</code> does not consume the <code>TS_CLRI</code> and <code>TS_BITS</code> inode maps —
 it rebuilds the filesystem from the <code>TS_INODE</code> records directly. But <code>dump</code>
@@ -223,7 +229,7 @@ success. An oversized bootfile is now truncated to the sector, loudly.</p>
 <h2 id="5-for-a-maintainer">5. For a maintainer</h2>
 <ul>
 <li><strong>Zero the checksum field before summing it</strong>, in both the dump record and the
-VHD footer.</li>
+VHD footer. <code>restore</code> verifies it on read; <code>-f</code> is the only way past a bad one.</li>
 <li><strong>The dump inherits the image's byte order.</strong> Don't normalize tapes to one
 order; a PDP-11 tape must be a PDP-11 tape.</li>
 <li><strong>Keep writing <code>TS_CLRI</code>/<code>TS_BITS</code></strong> even though our <code>restore</code> ignores them.

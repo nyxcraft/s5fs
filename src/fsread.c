@@ -136,19 +136,19 @@ fsr_lbn_route(uint32_t laddr, uint32_t nindir, uint32_t lbn,
 		return 0;
 	}
 	lbn -= laddr;
-	if (lbn < per) {
+	if (lbn < P11_LEVEL_CAP(per, 1)) {
 		*slot = laddr;
 		*idx = lbn;
 		return 1;
 	}
-	lbn -= per;
-	if (lbn < per * per) {
+	lbn -= P11_LEVEL_CAP(per, 1);
+	if (lbn < P11_LEVEL_CAP(per, 2)) {
 		*slot = laddr + 1;
 		*idx = lbn;
 		return 2;
 	}
-	lbn -= per * per;
-	if (lbn < per * per * per) {
+	lbn -= P11_LEVEL_CAP(per, 2);
+	if (lbn < P11_LEVEL_CAP(per, 3)) {
 		*slot = laddr + 2;
 		*idx = lbn;
 		return 3;

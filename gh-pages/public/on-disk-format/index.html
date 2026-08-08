@@ -526,6 +526,12 @@ consistent — only the mapping was wrong.</p>
 <code>fsr_ind_index()</code> for the descent. All four readers call it. <strong>Do not
 re-open-code this ladder</strong> — that is the whole reason the bug existed in three
 places at once.</p>
+<p>The <em>writer</em> cannot call it: <code>s5fs_core</code> shares no logic with <code>fsread</code>, and that
+independence is what makes <code>fsck</code> a genuine cross-check of <code>mkfs</code>. So the level
+<strong>sizes</strong> — which are a structural fact, not logic — live in <code>pdp11fs.h</code> as
+<code>P11_LEVEL_CAP(nindir, L)</code>, and both sides take their numbers from there. The
+writer's fill order and the reader's routing stay exact inverses without either
+depending on the other.</p>
 <hr />
 <h2 id="5-directories">5. Directories</h2>
 <p>A directory is an ordinary file whose contents are fixed 16-byte records:</p>

@@ -218,6 +218,13 @@ The routing now lives once, in `fsr_lbn_route()` (declared in `fsread.h`), with
 re-open-code this ladder** — that is the whole reason the bug existed in three
 places at once.
 
+The *writer* cannot call it: `s5fs_core` shares no logic with `fsread`, and that
+independence is what makes `fsck` a genuine cross-check of `mkfs`. So the level
+**sizes** — which are a structural fact, not logic — live in `pdp11fs.h` as
+`P11_LEVEL_CAP(nindir, L)`, and both sides take their numbers from there. The
+writer's fill order and the reader's routing stay exact inverses without either
+depending on the other.
+
 ---
 
 ## 5. Directories

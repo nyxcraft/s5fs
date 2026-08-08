@@ -21,7 +21,11 @@
  * UCB dumps).  -B sets that record size AND the target block size (a faithful
  * restore keeps the block size); target byte order is PDP-11 to match.
  *
- * usage: s5fs restore [-B 512|1024|2048] [-d device | -b blocks | -s sectors] dumpfile image
+ * usage: s5fs restore [-B 512|1024|2048] [-f] [-d device | -b blocks | -s sectors]
+ *                     dumpfile image
+ *
+ * -f keeps going past a record whose checksum does not verify (for salvaging a
+ * damaged tape); without it a bad checksum stops the restore where it is.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -40,6 +44,7 @@
 
 /* dumprestor.h */
 #define DMAGIC 60011
+#define DCHECKSUM 84446 /* every record sums to this (dumprestor.h CHECKSUM) */
 #define TS_TAPE 1
 #define TS_INODE 2
 #define TS_BITS 3
@@ -75,7 +80,7 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-		"usage: s5fs restore [-B 512|1024|2048] [-d device | -b blocks | -s sectors]\n"
+		"usage: s5fs restore [-B 512|1024|2048] [-f] [-d device | -b blocks | -s sectors]\n"
 		"                    dumpfile image\n");
 	exit(2);
 }
@@ -92,6 +97,9 @@ must_num(const char *s, const char *what)
 	return v;
 }
 
+static int g_force;	       /* -f: keep going past a bad checksum */
+static unsigned long g_badsum; /* records whose checksum did not verify */
+
 static int
 rec_read(DR *dr, uint8_t *buf)
 {
@@ -105,12 +113,37 @@ rec_read(DR *dr, uint8_t *buf)
 	return 1;
 }
 
+/* Every header record carries a checksum chosen so the whole record sums to
+ * DCHECKSUM (the field itself counts, hence writing it as CHECKSUM - sum).
+ * dump(8) writes it and native restor(8) verifies it; we did not, so a corrupt
+ * tape was parsed as though it were sound -- the counts and offsets taken from
+ * a damaged record then drove everything downstream. */
+static int
+hdr_cksum_ok(DR *dr, const uint8_t *hdr)
+{
+	uint32_t s = 0, i, nw = dr->rec / 2;
+
+	for (i = 0; i < nw; i++)
+		s += dr->bo->get16(hdr + 2 * i);
+	return (s & 0xffff) == (DCHECKSUM & 0xffff);
+}
+
 static int
 gethead(DR *dr, uint8_t *hdr)
 {
 	if (!rec_read(dr, hdr))
 		return 0;
-	return (int)dr->bo->get16(hdr + C_MAGIC) == DMAGIC;
+	if ((int)dr->bo->get16(hdr + C_MAGIC) != DMAGIC)
+		return 0;
+	if (!hdr_cksum_ok(dr, hdr)) {
+		g_badsum++;
+		fprintf(stderr, "s5fs restore: bad record checksum at offset %lld%s\n",
+			(long long)(dr->pos - dr->rec),
+			g_force ? " (continuing: -f)" : "");
+		if (!g_force)
+			return 0;
+	}
+	return 1;
 }
 
 static int
@@ -208,7 +241,11 @@ cmd_restore(int argc, char **argv)
 	opts.mtime = -1;
 	opts.endian = S5_PDP11;
 
-	while ((c = getopt(argc, argv, "B:d:b:s:P:o:")) != -1) {
+	while ((c = getopt(argc, argv, "B:d:b:s:P:o:f")) != -1) {
+		if (c == 'f') {
+			g_force = 1;
+			continue;
+		}
 		switch (c) {
 		case 'B':
 			opts.bsize = (uint32_t)must_num(optarg, "block size");
@@ -422,5 +459,11 @@ cmd_restore(int argc, char **argv)
 	close(dr.fd);
 	printf("%s: %s, %lu %u-byte blocks; restored %u inodes (max #%u); %d free blocks left\n",
 	       image, fs.bo->name, blocks, fs.bsize, nrestored, maxino, fs.s_tfree);
+	if (g_badsum) {
+		fprintf(stderr, "s5fs restore: %lu record(s) failed checksum -- "
+				"the tape is damaged and this image may be incomplete\n",
+			g_badsum);
+		return 1;
+	}
 	return 0;
 }

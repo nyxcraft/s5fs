@@ -59,6 +59,13 @@ the image was read with. Metadata and data copy through verbatim, so
 `dump | restore` is a faithful round-trip and a tape from a PDP-11 image is
 readable by a real PDP-11.
 
+**`restore` verifies the checksum on every header record.** It did not, once,
+and a damaged tape was parsed as though it were sound — the counts and offsets
+taken from a corrupt record then drove everything downstream. A mismatch now
+stops the restore and names the offset; `restore -f` continues anyway, for
+salvaging what a damaged tape still holds, and exits non-zero either way so a
+script can tell.
+
 ### What restore skips
 
 Our own `s5fs restore` does not consume the `TS_CLRI` and `TS_BITS` inode maps —
@@ -165,7 +172,7 @@ success. An oversized bootfile is now truncated to the sector, loudly.
 ## 5. For a maintainer
 
 - **Zero the checksum field before summing it**, in both the dump record and the
-  VHD footer.
+  VHD footer. `restore` verifies it on read; `-f` is the only way past a bad one.
 - **The dump inherits the image's byte order.** Don't normalize tapes to one
   order; a PDP-11 tape must be a PDP-11 tape.
 - **Keep writing `TS_CLRI`/`TS_BITS`** even though our `restore` ignores them.

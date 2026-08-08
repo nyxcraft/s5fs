@@ -77,10 +77,18 @@ cmd_boot(int argc, char **argv)
 			}
 		}
 	}
-	if ((size_t)n - off > 512)
-		fprintf(stderr, "s5fs boot: warning: boot code is %zu bytes (>512); "
-				"the ROM loads only the first sector\n",
-			(size_t)n - off);
+	/* Block 0 is ONE 512-byte sector -- it is what the ROM loads, and on a
+	 * 512-byte filesystem the superblock begins at byte 512.  Writing more
+	 * than a sector here overwrote the superblock and the head of the i-list
+	 * and left the image unreadable, while printing a warning that said the
+	 * excess merely would not be *loaded*.  Clamp, and say so plainly. */
+	if ((size_t)n - off > 512) {
+		fprintf(stderr, "s5fs boot: %s: boot code is %zu bytes; only the first "
+				"512 (block 0) are installed -- the rest is NOT written, "
+				"because byte 512 onward is the superblock\n",
+			bootf, (size_t)n - off);
+		n = (ssize_t)(off + 512);
+	}
 
 	img = open(image, O_RDWR);
 	if (img < 0) {

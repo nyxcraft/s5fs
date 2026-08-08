@@ -406,6 +406,22 @@ if [ "$inivic" = 777 ] && [ "$inibad" -ge 3 ] && [ "$inimk" -eq 0 ] && fsck_clea
 	ok "device spec rejects malformed entries (and keys do not leak between sections)"
 else no "device spec validation (victim=$inivic diags=$inibad mkfs=$inimk)"; fi
 
+# 22. `boot` wrote the WHOLE bootfile at offset 0, up to 2048 bytes.  Block 0 is
+#     one 512-byte sector and on a 512-byte filesystem the superblock starts at
+#     byte 512, so an oversized bootfile overwrote the superblock and the head
+#     of the i-list -- while printing a warning saying the excess merely would
+#     not be *loaded*, and then reporting success.  It must clamp to one sector.
+"$S5" mkfs -B 512 -b 4000 "$T/bt.dsk" >/dev/null 2>&1
+"$S5" put -B 512 "$T/bt.dsk" "$T/src" /f >/dev/null 2>&1
+head -c 2000 /dev/zero 2>/dev/null | tr '\0' 'B' > "$T/bigboot"
+"$S5" boot "$T/bt.dsk" "$T/bigboot" >/dev/null 2>&1; btrc=$?
+btcat=$("$S5" cat -B 512 "$T/bt.dsk" /f 2>/dev/null | grep -c fox)
+btb0=$(od -An -c -N4 "$T/bt.dsk" | tr -d ' \n')          # block 0 still got the code
+if [ "$btrc" -eq 0 ] && [ "$btcat" -eq 1 ] && [ "$btb0" = "BBBB" ] &&
+   fsck_clean -B 512 "$T/bt.dsk"; then
+	ok "boot clamps an oversized bootfile to block 0"
+else no "boot clamps oversized bootfile (rc=$btrc cat=$btcat b0=$btb0)"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

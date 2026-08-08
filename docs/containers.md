@@ -146,7 +146,23 @@ footer, and nothing in this toolkit would be reused implementing them.
 
 ---
 
-## 4. For a maintainer
+## 4. The boot block
+
+`s5fs boot img bootfile` installs a primary bootstrap into **block 0**, which is
+not part of the filesystem — so it is independent of the fs contents, and of the
+block size. If the file starts with an a.out magic (`0407`/`0410`/`0411`) the
+16-byte exec header is skipped, matching mdec's `dd bs=8w skip=1`.
+
+**Block 0 is exactly one 512-byte sector, and the write is clamped to it.** That
+clamp is load-bearing: on a 512-byte filesystem the superblock begins at byte
+512, so writing a larger bootfile straight through overwrote the superblock and
+the head of the i-list and left the image unreadable — while printing a warning
+that said only that the excess would not be *loaded*, and then reporting
+success. An oversized bootfile is now truncated to the sector, loudly.
+
+---
+
+## 5. For a maintainer
 
 - **Zero the checksum field before summing it**, in both the dump record and the
   VHD footer.
@@ -157,5 +173,7 @@ footer, and nothing in this toolkit would be reused implementing them.
 - **`NTREC * BSIZE` is the tape record size.** It matches what the era's tools
   read; changing it makes tapes that parse but won't mount.
 - **VHD footers append at `SEEK_END`.** Never at the current offset.
+- **`boot` writes one sector, never more.** Byte 512 onward is the superblock
+  on a 512-byte filesystem.
 - **A wrapped VHD must stay readable by every other subcommand.** If a change
   makes `fsck img.vhd` fail, the change is wrong.

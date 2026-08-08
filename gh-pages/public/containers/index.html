@@ -41,7 +41,8 @@
 <li><a class="section-nav__link section-nav__link--l2" href="#2-simh-tap-framing">2. SIMH `.tap` framing</a></li>
 <li><a class="section-nav__link section-nav__link--l2" href="#3-fixed-vhd">3. Fixed VHD</a></li>
 <li><a class="section-nav__link section-nav__link--l3" href="#the-append-trap">The append trap</a></li>
-<li><a class="section-nav__link section-nav__link--l2" href="#4-for-a-maintainer">4. For a maintainer</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-the-boot-block">4. The boot block</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-for-a-maintainer">5. For a maintainer</a></li>
 </ul>
         </nav>
       </aside>
@@ -207,7 +208,19 @@ already has a footer, so double-wrapping cannot silently nest.</p>
 different format — a block allocation table and sparse data blocks — not a
 footer, and nothing in this toolkit would be reused implementing them.</p>
 <hr />
-<h2 id="4-for-a-maintainer">4. For a maintainer</h2>
+<h2 id="4-the-boot-block">4. The boot block</h2>
+<p><code>s5fs boot img bootfile</code> installs a primary bootstrap into <strong>block 0</strong>, which is
+not part of the filesystem — so it is independent of the fs contents, and of the
+block size. If the file starts with an a.out magic (<code>0407</code>/<code>0410</code>/<code>0411</code>) the
+16-byte exec header is skipped, matching mdec's <code>dd bs=8w skip=1</code>.</p>
+<p><strong>Block 0 is exactly one 512-byte sector, and the write is clamped to it.</strong> That
+clamp is load-bearing: on a 512-byte filesystem the superblock begins at byte
+512, so writing a larger bootfile straight through overwrote the superblock and
+the head of the i-list and left the image unreadable — while printing a warning
+that said only that the excess would not be <em>loaded</em>, and then reporting
+success. An oversized bootfile is now truncated to the sector, loudly.</p>
+<hr />
+<h2 id="5-for-a-maintainer">5. For a maintainer</h2>
 <ul>
 <li><strong>Zero the checksum field before summing it</strong>, in both the dump record and the
 VHD footer.</li>
@@ -218,6 +231,8 @@ Native <code>restor(8)</code> needs them, and that interop is a validation ancho
 <li><strong><code>NTREC * BSIZE</code> is the tape record size.</strong> It matches what the era's tools
 read; changing it makes tapes that parse but won't mount.</li>
 <li><strong>VHD footers append at <code>SEEK_END</code>.</strong> Never at the current offset.</li>
+<li><strong><code>boot</code> writes one sector, never more.</strong> Byte 512 onward is the superblock
+on a 512-byte filesystem.</li>
 <li><strong>A wrapped VHD must stay readable by every other subcommand.</strong> If a change
 makes <code>fsck img.vhd</code> fail, the change is wrong.</li>
 </ul>

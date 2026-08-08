@@ -94,11 +94,23 @@ own fixtures, so it needs **no historical data** and runs anywhere.
 
 What it covers: `mkfs`, put/get byte-identity, mkdir/cp/mv/rm, the `@` host
 round-trip, `tar c|x` tree round-trip, `dump|restore` tree round-trip, `.tap`
-framing, partition isolation and whole-disk sizing, VHD wrap/info/read/unwrap,
-little-endian images, 2048-byte blocks, the oversize guard, the SysV superblock
-(present with `-F sysv`, absent by default, surviving a read-write round-trip),
-`fsdb` inspect and edit, `manifest`/`verify`, `scavenge`, the analysis bundle,
-and the multi-mount shell including cross-image `cp`.
+framing, partition isolation and whole-disk sizing, the raw `-o` offset
+selector, VHD wrap/info/read/unwrap, **all three byte orders**, 2048-byte
+blocks, the oversize guard, the SysV superblock, `fsdb` inspect and edit,
+`manifest`/`verify`, `scavenge`, the analysis bundle, hard links (shared inode,
+surviving tar), device nodes from a `-D` spec, compressed tar input, `clri`,
+time preservation, and the multi-mount shell including cross-image `cp`.
+
+Plus a regression check for every bug found in review — each one verified to
+**fail against the code before the fix**, because a test that cannot fail is
+worse than no test: it reads as coverage.
+
+For the checks that are not tied to a fixed bug, the same question was answered
+by **mutation**: break the feature deliberately and confirm the test notices.
+All six of the coverage-gap checks were validated that way — encode big-endian
+32-bit values as little-endian, stop `tar c` emitting hard-link records, swap
+major and minor, disable the `-o` branch, hide the gzip magic, make `clri` a
+no-op. Every one was caught.
 
 Two properties give it its teeth:
 

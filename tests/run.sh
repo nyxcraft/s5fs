@@ -484,6 +484,95 @@ if [ -n "$ttfile" ] && [ "$ttfile" -lt 600000000 ] &&
 	ok "mktree preserves host directory times"
 else no "mktree preserves directory times (root=$ttroot dir=$ttdir deep=$ttdeep file=$ttfile lf=$ttlf)"; fi
 
+# 26. big-endian images.  The BE codec had NO coverage at all -- only le was
+#     exercised, and pdp11 by default -- so its 16/24/32-bit encodings were
+#     never once checked against a round-trip.
+"$S5" mkfs -a be -d rl02 "$T/be.dsk" >/dev/null 2>&1
+"$S5" put "$T/be.dsk" "$T/src" /f >/dev/null 2>&1
+"$S5" mkdir "$T/be.dsk" /d >/dev/null 2>&1
+begot=$("$S5" cat "$T/be.dsk" /f 2>/dev/null | grep -c fox)
+bedet=$("$S5" fsck "$T/be.dsk" 2>/dev/null | grep -c ' be ')     # byte order auto-detected
+"$S5" tar c "$T/be.dsk" "$T/be.tar" >/dev/null 2>&1
+"$S5" tar x -a be -d rl02 "$T/be.tar" "$T/be2.dsk" >/dev/null 2>&1
+bert=$("$S5" cat "$T/be2.dsk" /f 2>/dev/null | grep -c fox)
+if [ "$begot" -eq 1 ] && [ "$bedet" -eq 1 ] && [ "$bert" -eq 1 ] &&
+   fsck_clean "$T/be.dsk" && fsck_clean "$T/be2.dsk"; then
+	ok "big-endian images round-trip (and auto-detect)"
+else no "big-endian images (cat=$begot detect=$bedet roundtrip=$bert)"; fi
+
+# 27. hard links: one inode, two names, nlink 2 -- and they must survive a tar
+#     round-trip, which means tar c emitting type '1' and tar x resolving it.
+mkdir -p "$T/hl" && echo linked > "$T/hl/a"
+if ln "$T/hl/a" "$T/hl/b" 2>/dev/null; then
+	"$S5" mktree -d rl02 "$T/hl" "$T/hl.dsk" >/dev/null 2>&1
+	hlnl=$("$S5" ls -l "$T/hl.dsk" / 2>/dev/null | awk '$NF == "a" {print $2}')
+	"$S5" tar c "$T/hl.dsk" "$T/hl.tar" >/dev/null 2>&1
+	hltype=$(tar tvf "$T/hl.tar" 2>/dev/null | grep -c 'link to\|=>' )
+	"$S5" tar x -d rl02 "$T/hl.tar" "$T/hl2.dsk" >/dev/null 2>&1
+	hlnl2=$("$S5" ls -l "$T/hl2.dsk" / 2>/dev/null | awk '$NF == "a" {print $2}')
+	hlsame=$("$S5" cat "$T/hl2.dsk" /b 2>/dev/null | grep -c linked)
+	if [ "$hlnl" = 2 ] && [ "$hlnl2" = 2 ] && [ "$hlsame" -eq 1 ] &&
+	   fsck_clean "$T/hl.dsk" && fsck_clean "$T/hl2.dsk"; then
+		ok "hard links share an inode and survive tar"
+	else no "hard links (nlink=$hlnl after-tar=$hlnl2 content=$hlsame tartype=$hltype)"; fi
+else
+	no "hard links (host filesystem refused ln)"
+fi
+
+# 28. device nodes from a -D spec: major/minor are packed into di_addr[0] as
+#     (major<<8)|minor, so a wrong pack shows up as the wrong device numbers.
+printf 'console c 0 0 0600\nrl0 b 5 3 0640\n' > "$T/dev.spec"
+mkdir -p "$T/dt" && echo x > "$T/dt/x"
+"$S5" mktree -d rl02 -D "$T/dev.spec" "$T/dt" "$T/dv.dsk" >/dev/null 2>&1
+dvc=$("$S5" ls -l "$T/dv.dsk" /dev 2>/dev/null | awk '$NF == "console" {print $1, $5, $6}')
+dvb=$("$S5" ls -l "$T/dv.dsk" /dev 2>/dev/null | awk '$NF == "rl0"     {print $1, $5, $6}')
+if [ "$dvc" = "crw------- 0, 0" ] && [ "$dvb" = "brw-r----- 5, 3" ] && fsck_clean "$T/dv.dsk"; then
+	ok "device nodes carry type, mode and major/minor"
+else no "device nodes (console='$dvc' rl0='$dvb')"; fi
+
+# 29. compressed tar input.  open_archive forks gzip/bzip2 into a temp file
+#     because the parser must seek -- an entire fork/exec/tempfile path that
+#     nothing exercised.  Skipped, not failed, where the tool is absent.
+"$S5" tar c "$T/a.dsk" "$T/pl.tar" >/dev/null 2>&1
+zn=0; zok=0
+for z in gzip bzip2; do
+	command -v $z >/dev/null 2>&1 || continue
+	zn=$((zn + 1))
+	ext=gz; [ $z = bzip2 ] && ext=bz2
+	$z -c "$T/pl.tar" > "$T/pl.tar.$ext" 2>/dev/null
+	"$S5" tar x -d rl02 "$T/pl.tar.$ext" "$T/z-$ext.dsk" >/dev/null 2>&1
+	"$S5" tar c "$T/z-$ext.dsk" "$T/z-$ext.tar" >/dev/null 2>&1
+	cmp -s "$T/pl.tar" "$T/z-$ext.tar" && fsck_clean "$T/z-$ext.dsk" && zok=$((zok + 1))
+done
+if [ "$zn" -eq 0 ]; then ok "compressed tar (skipped: no gzip/bzip2)"
+elif [ "$zok" -eq "$zn" ]; then ok "compressed tar input decompresses and matches ($zn format(s))"
+else no "compressed tar ($zok/$zn formats round-tripped)"; fi
+
+# 30. the raw -o START[:LEN] selector -- the third way to place a filesystem,
+#     for disks whose partition table you do not have.  Only -d/-P was tested.
+"$S5" mkfs -d rp06 -o 100:20000 "$T/raw.dsk" >/dev/null 2>&1
+"$S5" put -o 100:20000 "$T/raw.dsk" "$T/src" /f >/dev/null 2>&1
+rawcat=$("$S5" cat -o 100:20000 "$T/raw.dsk" /f 2>/dev/null | grep -c fox)
+"$S5" fsck "$T/raw.dsk" >/dev/null 2>&1; rawzero=$?    # must NOT parse at offset 0
+if [ "$rawcat" -eq 1 ] && [ "$rawzero" -ne 0 ] && fsck_clean -o 100:20000 "$T/raw.dsk"; then
+	ok "raw -o offset places a filesystem inside a larger file"
+else no "raw -o offset (cat=$rawcat at-zero-rc=$rawzero)"; fi
+
+# 31. clri zeroes an inode without touching the directory that names it, which
+#     is the point: it leaves a dangling entry for fsck -p to zap.
+"$S5" mkfs -d rl02 "$T/cl.dsk" >/dev/null 2>&1
+"$S5" put "$T/cl.dsk" "$T/src" /doomed >/dev/null 2>&1
+clino=$(printf 'path /doomed\nquit\n' | "$S5" fsdb "$T/cl.dsk" 2>/dev/null |
+	grep -oE 'inode [0-9]+' | awk '{print $2}')
+"$S5" clri "$T/cl.dsk" "$clino" >/dev/null 2>&1; clrc=$?
+cldang=$("$S5" fsck "$T/cl.dsk" 2>&1 | grep -c 'unallocated inode\|dangling')
+"$S5" fsck -p "$T/cl.dsk" >/dev/null 2>&1
+clgone=$("$S5" ls "$T/cl.dsk" / 2>/dev/null | grep -c '^doomed$')
+if [ "$clrc" -eq 0 ] && [ -n "$clino" ] && [ "$cldang" -ge 1 ] && [ "$clgone" -eq 0 ] &&
+   fsck_clean "$T/cl.dsk"; then
+	ok "clri leaves a dangling entry that fsck -p zaps"
+else no "clri (rc=$clrc ino=$clino dangling=$cldang stillthere=$clgone)"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

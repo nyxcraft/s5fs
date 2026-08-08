@@ -129,11 +129,21 @@ isolated, each <code>fsck</code>s clean independently, and <code>-P a</code> mou
 own fixtures, so it needs <strong>no historical data</strong> and runs anywhere.</p>
 <p>What it covers: <code>mkfs</code>, put/get byte-identity, mkdir/cp/mv/rm, the <code>@</code> host
 round-trip, <code>tar c|x</code> tree round-trip, <code>dump|restore</code> tree round-trip, <code>.tap</code>
-framing, partition isolation and whole-disk sizing, VHD wrap/info/read/unwrap,
-little-endian images, 2048-byte blocks, the oversize guard, the SysV superblock
-(present with <code>-F sysv</code>, absent by default, surviving a read-write round-trip),
-<code>fsdb</code> inspect and edit, <code>manifest</code>/<code>verify</code>, <code>scavenge</code>, the analysis bundle,
-and the multi-mount shell including cross-image <code>cp</code>.</p>
+framing, partition isolation and whole-disk sizing, the raw <code>-o</code> offset
+selector, VHD wrap/info/read/unwrap, <strong>all three byte orders</strong>, 2048-byte
+blocks, the oversize guard, the SysV superblock, <code>fsdb</code> inspect and edit,
+<code>manifest</code>/<code>verify</code>, <code>scavenge</code>, the analysis bundle, hard links (shared inode,
+surviving tar), device nodes from a <code>-D</code> spec, compressed tar input, <code>clri</code>,
+time preservation, and the multi-mount shell including cross-image <code>cp</code>.</p>
+<p>Plus a regression check for every bug found in review — each one verified to
+<strong>fail against the code before the fix</strong>, because a test that cannot fail is
+worse than no test: it reads as coverage.</p>
+<p>For the checks that are not tied to a fixed bug, the same question was answered
+by <strong>mutation</strong>: break the feature deliberately and confirm the test notices.
+All six of the coverage-gap checks were validated that way — encode big-endian
+32-bit values as little-endian, stop <code>tar c</code> emitting hard-link records, swap
+major and minor, disable the <code>-o</code> branch, hide the gzip magic, make <code>clri</code> a
+no-op. Every one was caught.</p>
 <p>Two properties give it its teeth:</p>
 <ul>
 <li><strong>Every mutating flow ends by asserting <code>s5fs fsck</code> prints <code>clean</code>.</strong></li>

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Containers: dump tapes, SIMH `.tap`, and fixed VHD | s5fs</title>
+  <meta name="description" content="Three wrappers that carry an s5fs filesystem somewhere else: the 2.9BSD dump(8) tape format, the SIMH .tap tape framing that wraps it, and the fixed VHD footer that lets a modern hypervisor or SIMH attach a raw image.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">Containers: dump tapes, SIMH `.tap`, and fixed VHD</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-the-dump-tape-format">1. The dump tape format</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#the-checksum">The checksum</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#byte-order">Byte order</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#what-restore-skips">What restore skips</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-simh-tap-framing">2. SIMH `.tap` framing</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-fixed-vhd">3. Fixed VHD</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#the-append-trap">The append trap</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-for-a-maintainer">4. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>Containers: dump tapes, SIMH `.tap`, and fixed VHD</h1>
+          <p class="docs-article__summary">Three wrappers that carry an s5fs filesystem somewhere else: the 2.9BSD dump(8) tape format, the SIMH .tap tape framing that wraps it, and the fixed VHD footer that lets a modern hypervisor or SIMH attach a raw image.</p>
+          <p class="docs-article__source">Containers: dump tapes, SIMH `.tap`, and fixed VHD</p>
+        </header>
+        <div class="prose">
+<p>Three wrappers that carry an s5fs filesystem somewhere else: the 2.9BSD
+<code>dump(8)</code> tape format, the SIMH <code>.tap</code> tape framing that wraps it, and the fixed
+VHD footer that lets a modern hypervisor or SIMH attach a raw image.</p>
+<p>Code: <code>src/cmd_dump.c</code>, <code>src/cmd_restore.c</code>, <code>src/cmd_vhd.c</code>.</p>
+<hr />
+<h2 id="1-the-dump-tape-format">1. The dump tape format</h2>
+<p><code>s5fs dump</code> writes the real historical format from <code>dumprestor.h</code> — not an
+approximation of it. The structure of a tape:</p>
+<pre><code>  TS_TAPE     header
+  TS_CLRI     map of inodes to clear
+  TS_BITS     map of inodes present in this dump
+  TS_INODE    one per allocated inode, followed by its data blocks
+   (+ TS_ADDR   continuation records for indirect blocks)
+  TS_END
+</code></pre>
+<p>Constants:</p>
+<table>
+<thead>
+<tr>
+<th>name</th>
+<th>value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MAGIC</code></td>
+<td>60011</td>
+</tr>
+<tr>
+<td><code>CHECKSUM</code></td>
+<td>84446</td>
+</tr>
+<tr>
+<td><code>TS_TAPE</code> / <code>TS_INODE</code> / <code>TS_BITS</code> / <code>TS_ADDR</code> / <code>TS_END</code> / <code>TS_CLRI</code></td>
+<td>1 / 2 / 3 / 4 / 5 / 6</td>
+</tr>
+<tr>
+<td><code>NTREC</code></td>
+<td>10 blocks per tape record</td>
+</tr>
+</tbody>
+</table>
+<p>The record header (<code>struct spcl</code>) carries the type, the dump and prior-dump
+dates, a volume number, the inode number, the magic, a checksum, an embedded
+copy of the 64-byte dinode at offset 22, and a block count and address map.</p>
+<h3 id="the-checksum">The checksum</h3>
+<p>Every record carries a 16-bit checksum computed so that the whole record sums
+to a fixed constant:</p>
+<pre><code class="language-c">put16(spcl + C_CHECKSUM, 0);                        /* zero the field first */
+for (i = 0; i &lt; words; i++)
+        s += get16(spcl + 2 * i);
+put16(spcl + C_CHECKSUM, (CHECKSUM - s) &amp; 0xffff);  /* 84446 - sum */
+</code></pre>
+<p>Zeroing the field before summing is not optional — the checksum covers itself,
+so it has to be a known value while the sum is taken. This is the classic shape
+of the era's tape checksums, and it is what native <code>restor(8)</code> validates.</p>
+<h3 id="byte-order">Byte order</h3>
+<p><strong>The dump inherits the image's byte order.</strong> A PDP-11 image produces a PDP-11
+tape; the <code>spcl</code> fields and the embedded dinode go out through the same codec
+the image was read with. Metadata and data copy through verbatim, so
+<code>dump | restore</code> is a faithful round-trip and a tape from a PDP-11 image is
+readable by a real PDP-11.</p>
+<h3 id="what-restore-skips">What restore skips</h3>
+<p>Our own <code>s5fs restore</code> does not consume the <code>TS_CLRI</code> and <code>TS_BITS</code> inode maps —
+it rebuilds the filesystem from the <code>TS_INODE</code> records directly. But <code>dump</code>
+still <strong>writes</strong> them correctly, because native <code>restor(8)</code> does read them.
+That asymmetry is intentional and is exactly what the native-tool validation
+proves (see <a href="../validation/index.html"><code>validation.md</code></a>).</p>
+<hr />
+<h2 id="2-simh-tap-framing">2. SIMH <code>.tap</code> framing</h2>
+<p><code>dump -T</code> wraps the flat tape in SIMH's <code>.tap</code> container so it can be attached
+to an emulated TM/TS drive.</p>
+<p>The framing: group <code>NTREC</code> blocks into one tape record, and bracket each record
+with a <strong>4-byte little-endian length, before and after</strong>:</p>
+<pre><code>  [len][ ... NTREC * BSIZE bytes ... ][len]  [len][ ... ][len]  ...  [0][0]
+</code></pre>
+<p>The length appears twice so the tape can be read in either direction, which is
+what a real drive supports. Two zero-length records (eight zero bytes) mark
+end-of-tape.</p>
+<p>The record size is not arbitrary: <code>NTREC * BSIZE</code> is exactly what the historical
+<code>dump</code> wrote in one <code>write()</code> and exactly what <code>restor(8)</code> asks for with
+<code>read(mt, tbf, NTREC*BSIZE)</code>. Matching it is what makes the tape mount and read
+on an emulated drive rather than merely parse.</p>
+<p>The test suite asserts the framed tape is larger than the flat one and ends in
+eight zero bytes.</p>
+<hr />
+<h2 id="3-fixed-vhd">3. Fixed VHD</h2>
+<p>A fixed VHD is a raw sector image with a <strong>512-byte footer appended at the end</strong>.
+Nothing about the data changes. That placement is the whole reason this is
+cheap: because the footer sits <em>after</em> the filesystem, every other command in
+this toolkit reads a wrapped image transparently — <code>fsck</code>, <code>ls</code>, and <code>put</code> do
+not know or care that it is there.</p>
+<p>The test suite checks exactly that: <code>fsck</code> on a <code>.vhd</code> comes back clean.</p>
+<p>Footer fields, all <strong>big-endian regardless of the image's own byte order</strong> (the
+VHD spec is big-endian; the filesystem inside it is not):</p>
+<table>
+<thead>
+<tr>
+<th>offset</th>
+<th>field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>cookie <code>conectix</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td>features (reserved bit, <code>0x00000002</code>)</td>
+</tr>
+<tr>
+<td>…</td>
+<td>version, data offset, timestamp, creator</td>
+</tr>
+<tr>
+<td>…</td>
+<td>original and current size, CHS geometry</td>
+</tr>
+<tr>
+<td>…</td>
+<td>disk type = fixed</td>
+</tr>
+<tr>
+<td>64</td>
+<td>ones-complement checksum</td>
+</tr>
+<tr>
+<td>68</td>
+<td>unique id (left zero; SIMH ignores it)</td>
+</tr>
+</tbody>
+</table>
+<p>CHS geometry follows the spec's Appendix algorithm mapping total sectors to
+cylinders/heads/sectors. The checksum is the ones' complement of the sum of
+every other byte, with the checksum field itself zero during the sum — same
+discipline as the dump record checksum.</p>
+<pre><code class="language-sh">s5fs vhd wrap   src [dst]    # append the footer (in place if no dst)
+s5fs vhd unwrap src [dst]    # strip it
+s5fs vhd info   file         # print the footer fields
+</code></pre>
+<h3 id="the-append-trap">The append trap</h3>
+<p><strong>Always <code>lseek(SEEK_END)</code> before writing the footer.</strong> Writing at the current
+offset overwrites the last 512 bytes of the filesystem with the footer and
+produces a file that is exactly the right length, carries a valid <code>conectix</code>
+cookie, and has lost a block of user data. It looks correct to every check that
+does not read that specific block.</p>
+<p>This bug was introduced once and fixed once. <code>wrap</code> also refuses an image that
+already has a footer, so double-wrapping cannot silently nest.</p>
+<p><strong>Dynamic and differencing VHD are out of scope.</strong> They are a genuinely
+different format — a block allocation table and sparse data blocks — not a
+footer, and nothing in this toolkit would be reused implementing them.</p>
+<hr />
+<h2 id="4-for-a-maintainer">4. For a maintainer</h2>
+<ul>
+<li><strong>Zero the checksum field before summing it</strong>, in both the dump record and the
+VHD footer.</li>
+<li><strong>The dump inherits the image's byte order.</strong> Don't normalize tapes to one
+order; a PDP-11 tape must be a PDP-11 tape.</li>
+<li><strong>Keep writing <code>TS_CLRI</code>/<code>TS_BITS</code></strong> even though our <code>restore</code> ignores them.
+Native <code>restor(8)</code> needs them, and that interop is a validation anchor.</li>
+<li><strong><code>NTREC * BSIZE</code> is the tape record size.</strong> It matches what the era's tools
+read; changing it makes tapes that parse but won't mount.</li>
+<li><strong>VHD footers append at <code>SEEK_END</code>.</strong> Never at the current offset.</li>
+<li><strong>A wrapped VHD must stay readable by every other subcommand.</strong> If a change
+makes <code>fsck img.vhd</code> fail, the change is wrong.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

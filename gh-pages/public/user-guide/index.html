@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>User guide | s5fs</title>
+  <meta name="description" content="s5fs creates, inspects, edits, repairs, and converts disk images holding the traditional Unix filesystem — the V7 / System V filesystem, called s5fs.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">User guide</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-synopsis">1. Synopsis</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-the-commands">2. The commands</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-making-a-filesystem">3. Making a filesystem</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-getting-files-in-and-out">4. Getting files in and out</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-the-interactive-shell">5. The interactive shell</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-checking-and-repairing">6. Checking and repairing</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#7-scavenging-deleted-files">7. Scavenging deleted files</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#8-limits">8. Limits</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#9-exit-status">9. Exit status</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#10-examples">10. Examples</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>User guide</h1>
+          <p class="docs-article__summary">s5fs creates, inspects, edits, repairs, and converts disk images holding the traditional Unix filesystem — the V7 / System V filesystem, called s5fs.</p>
+          <p class="docs-article__source">s5fs — user guide</p>
+        </header>
+        <div class="prose">
+<p><code>s5fs</code> creates, inspects, edits, repairs, and converts disk images holding the
+traditional Unix filesystem — the V7 / System V filesystem, called <strong>s5fs</strong>. It
+runs on your host, needs no kernel support, and never has to mount anything.</p>
+<p>For how it works, see the <a href="../design/index.html">design document</a>.</p>
+<hr />
+<h2 id="1-synopsis">1. Synopsis</h2>
+<pre><code>s5fs &lt;command&gt; [args ...]
+</code></pre>
+<p>Run any command with no arguments for its own usage. <code>s5fs help</code> lists them all.</p>
+<p>Most commands take the same image-selection options:</p>
+<table>
+<thead>
+<tr>
+<th>option</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-B 512|1024|2048</code></td>
+<td>filesystem block size (default <strong>1024</strong>)</td>
+</tr>
+<tr>
+<td><code>-A pdp11|le|be</code></td>
+<td>on-disk byte order (default: <strong>auto-detect</strong> on read)</td>
+</tr>
+<tr>
+<td><code>-d DEV</code></td>
+<td>disk type, e.g. <code>rl02</code>, <code>rp06</code> (<code>s5fs devices</code> lists them)</td>
+</tr>
+<tr>
+<td><code>-P LETTER</code></td>
+<td>partition <code>a</code>..<code>h</code> of that disk type</td>
+</tr>
+<tr>
+<td><code>-o BLK[:LEN]</code></td>
+<td>explicit base offset in 512-byte blocks, instead of <code>-d</code>/<code>-P</code></td>
+</tr>
+</tbody>
+</table>
+<p>There is <strong>no on-disk marker for the block size</strong>, exactly as the era's
+compile-time <code>BSIZE</code> worked — so if an image is not 1024, you must say <code>-B</code>.
+Byte order <em>is</em> auto-detected, because the superblock's <code>isize</code>/<code>fsize</code> pair only
+decodes sanely under the right codec.</p>
+<hr />
+<h2 id="2-the-commands">2. The commands</h2>
+<p><strong>Create and populate</strong></p>
+<table>
+<thead>
+<tr>
+<th>command</th>
+<th>what it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mkfs</code></td>
+<td>create a filesystem image</td>
+</tr>
+<tr>
+<td><code>mktree</code></td>
+<td>build an image from a host directory tree</td>
+</tr>
+<tr>
+<td><code>tar c</code> / <code>tar x</code></td>
+<td>image → tar archive, and tar → image (reads <code>.gz</code>/<code>.bz2</code>/<code>.Z</code>)</td>
+</tr>
+<tr>
+<td><code>restore</code></td>
+<td>restore a 2.9BSD dump tape into an image</td>
+</tr>
+<tr>
+<td><code>dump</code></td>
+<td>write a 2.9BSD dump tape from an image (<code>-T</code> for SIMH <code>.tap</code>)</td>
+</tr>
+<tr>
+<td><code>boot</code></td>
+<td>install a bootstrap into block 0</td>
+</tr>
+<tr>
+<td><code>vhd</code></td>
+<td>wrap / unwrap / describe a fixed-VHD container</td>
+</tr>
+</tbody>
+</table>
+<p><strong>File access</strong> — no mount required</p>
+<table>
+<thead>
+<tr>
+<th>command</th>
+<th>what it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ls</code> <code>cat</code> <code>get</code> <code>put</code> <code>cp</code> <code>mv</code> <code>rm</code></td>
+<td>the obvious things</td>
+</tr>
+<tr>
+<td><code>mkdir</code> <code>rmdir</code> <code>chmod</code> <code>chown</code> <code>chgrp</code></td>
+<td>the other obvious things</td>
+</tr>
+<tr>
+<td><code>shell</code></td>
+<td>interactive explorer with a mount table (§5)</td>
+</tr>
+<tr>
+<td><code>mount</code> / <code>umount</code></td>
+<td>FUSE-mount an image (needs <code>make FUSE=1</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Check and repair</strong></p>
+<table>
+<thead>
+<tr>
+<th>command</th>
+<th>what it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fsck</code></td>
+<td>check an image; <code>-p</code> repairs, <code>-l</code> lists the tree</td>
+</tr>
+<tr>
+<td><code>icheck</code></td>
+<td>block and free-list check; <code>-s</code> salvages the free list</td>
+</tr>
+<tr>
+<td><code>dcheck</code></td>
+<td>directory link-count check</td>
+</tr>
+<tr>
+<td><code>clri</code></td>
+<td>clear (zero) inodes by number</td>
+</tr>
+<tr>
+<td><code>fsdb</code></td>
+<td>interactive filesystem debugger; <code>-w</code> to edit</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Analyze</strong></p>
+<table>
+<thead>
+<tr>
+<th>command</th>
+<th>what it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest</code> / <code>verify</code></td>
+<td>fingerprint an image, and diff one against a manifest</td>
+</tr>
+<tr>
+<td><code>scavenge</code></td>
+<td>recover deleted-file remnants (§7)</td>
+</tr>
+<tr>
+<td><code>ncheck</code></td>
+<td>inode → path; <code>-s</code> audits setuid/setgid and device nodes</td>
+</tr>
+<tr>
+<td><code>quot</code></td>
+<td>blocks and files per owner</td>
+</tr>
+<tr>
+<td><code>du</code></td>
+<td>disk usage per directory subtree</td>
+</tr>
+<tr>
+<td><code>df</code></td>
+<td>block and inode usage summary</td>
+</tr>
+<tr>
+<td><code>labelit</code></td>
+<td>read or set the volume label</td>
+</tr>
+<tr>
+<td><code>devices</code></td>
+<td>list known disk types and their partitions</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-making-a-filesystem">3. Making a filesystem</h2>
+<pre><code class="language-sh">s5fs mkfs -d rl02 root.dsk           # size it from a known disk type
+s5fs mkfs -b 20000 small.dsk         # or give a block count directly
+s5fs mkfs -B 2048 -a le big.dsk      # 2048-byte blocks, little-endian
+s5fs mkfs -F sysv -a le sysv.dsk     # also write the System V superblock magic
+</code></pre>
+<p>Useful <code>mkfs</code> options:</p>
+<table>
+<thead>
+<tr>
+<th>option</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-d DEV</code> / <code>-b N</code> / <code>-s N</code></td>
+<td>size from a disk type, a block count, or 512-byte sectors</td>
+</tr>
+<tr>
+<td><code>-B N</code></td>
+<td>block size (512 / 1024 / 2048)</td>
+</tr>
+<tr>
+<td><code>-a BO</code></td>
+<td>byte order to write (<code>pdp11</code> default, <code>le</code>, <code>be</code>)</td>
+</tr>
+<tr>
+<td><code>-F sysv</code></td>
+<td>add the System V superblock magic and type</td>
+</tr>
+<tr>
+<td><code>-i N</code></td>
+<td>minimum inode count (otherwise the historical size heuristic)</td>
+</tr>
+<tr>
+<td><code>-t SECS</code></td>
+<td>timestamp to stamp, instead of now</td>
+</tr>
+<tr>
+<td><code>-m</code> / <code>-n</code></td>
+<td>free-list rotational interleave (defaults 5 and 10)</td>
+</tr>
+</tbody>
+</table>
+<p><code>mkfs</code> <strong>refuses</strong> a filesystem larger than 2²⁴ blocks rather than silently
+truncating the block addresses. See <a href="#8-limits">Limits</a>.</p>
+<hr />
+<h2 id="4-getting-files-in-and-out">4. Getting files in and out</h2>
+<p>Nothing here needs root, a loop device, or a kernel that understands s5fs.</p>
+<pre><code class="language-sh">s5fs put  img.dsk ./hello /bin/hello      # host  → image
+s5fs get  img.dsk /etc/passwd ./passwd    # image → host
+s5fs cat  img.dsk /etc/motd
+s5fs ls -l img.dsk /bin
+s5fs cp   img.dsk /bin/sh /bin/sh.bak     # within the image
+s5fs cp   img.dsk @./local /tmp/remote    # '@' = a HOST path
+s5fs rm   img.dsk /tmp/junk
+s5fs mkdir -p img.dsk /usr/local/bin
+</code></pre>
+<p>The <code>@</code> prefix marks a host path, so <code>cp</code> moves data in either direction.</p>
+<p>To build a whole image from a host tree, or to move a tree between images:</p>
+<pre><code class="language-sh">s5fs mktree -d rp06 ./rootfs new.dsk      # host tree → fresh image
+s5fs tar c img.dsk backup.tar             # image → tar
+s5fs tar x -d rl02 backup.tar new.dsk     # tar → fresh image
+</code></pre>
+<p><code>mktree</code> preserves host file times. It does <strong>not</strong> currently preserve
+directory and device-node times — those are stamped with the filesystem's
+creation time. This is the one known gap.</p>
+<hr />
+<h2 id="5-the-interactive-shell">5. The interactive shell</h2>
+<p><code>s5fs shell</code> is not a single-image browser — it is a small VFS with a mount
+table:</p>
+<pre><code class="language-sh">s5fs shell root.dsk                       # auto-mounts at /
+</code></pre>
+<pre><code>mount usr.dsk /usr            mount another image anywhere
+mount -r old.dsk /old         read-only
+umount /usr                   drop a mount
+mounts                        show the table
+cd  pwd  ls [-l] [-a]  cat  stat
+get imgpath [host]            put host [imgpath]
+cp [@]src [@]dst              mv  rm  mkdir  rmdir  chmod  chown  chgrp
+help  quit
+</code></pre>
+<p>Every path is routed to the mount serving it — <strong>the deepest mountpoint that
+prefixes the path wins</strong> — so overlapping mounts shadow the way you would
+expect, and <code>cp</code> resolves each side independently:</p>
+<pre><code>mount a.dsk /a
+mount b.dsk /b
+cp /a/etc/passwd /b/tmp/passwd        # copies BETWEEN two different images
+cp @./hostfile /a/tmp/x               # '@' escapes to the host filesystem
+</code></pre>
+<p>A write to a mount you mounted <code>-r</code> returns <code>Read-only file system</code>. Virtual
+intermediate directories — path components no mount claims — are navigable with
+<code>cd</code>.</p>
+<hr />
+<h2 id="6-checking-and-repairing">6. Checking and repairing</h2>
+<pre><code class="language-sh">s5fs fsck img.dsk                 # check; prints &quot;clean&quot; if it is
+s5fs fsck -l img.dsk              # ... and list the tree
+s5fs fsck -p img.dsk              # repair what it can
+</code></pre>
+<p><code>fsck</code> runs three phases: block accounting (every block belongs to exactly one
+of reserved / inode-referenced / free), inode and directory sanity (dangling
+entries, bad <code>.</code>, link counts), and connectivity (anything allocated but
+unreachable from the root is an orphan). <code>-p</code> zeroes directory entries pointing
+at free inodes, reconnects orphans into <code>/lost+found</code>, and rebuilds the free
+list.</p>
+<p><code>icheck</code>, <code>dcheck</code>, and <code>clri</code> are the narrower historical tools, kept
+separately for when you want just one of those jobs.</p>
+<p>For hand inspection and surgical edits:</p>
+<pre><code class="language-sh">s5fs fsdb img.dsk                 # read-only
+s5fs fsdb -w img.dsk              # allow edits
+</code></pre>
+<p><code>fsdb</code> understands <code>sb</code>, <code>inode N</code>, <code>path /some/file</code>, <code>block N</code>, and — with
+<code>-w</code> — <code>set N FIELD VALUE</code>. Always re-run <code>fsck</code> after editing.</p>
+<p>To detect drift over time:</p>
+<pre><code class="language-sh">s5fs manifest img.dsk &gt; baseline.txt
+s5fs verify img.dsk baseline.txt      # nonzero exit if anything changed
+</code></pre>
+<hr />
+<h2 id="7-scavenging-deleted-files">7. Scavenging deleted files</h2>
+<pre><code class="language-sh">s5fs scavenge img.dsk                 # report
+s5fs scavenge -x outdir img.dsk       # extract what it can carve
+</code></pre>
+<p><strong>This is not undelete, and it cannot be.</strong> The free list is chained <em>through</em>
+the freed blocks themselves, so roughly one freed block in fifty is overwritten
+by the chain, and files were never laid out contiguously to begin with. What
+<code>scavenge</code> actually does is recover <strong>deleted names</strong> — ghost directory entries
+whose inode field was cleared but whose name bytes survive — and <strong>carve by
+signature</strong> (<code>a.out</code>, <code>ar</code>, <code>tar</code>, and plain text). Expect names and fragments,
+not files. The command was renamed from <code>recover</code> precisely so the name would
+stop over-promising.</p>
+<hr />
+<h2 id="8-limits">8. Limits</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>limit</th>
+<th>why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>filesystem</td>
+<td>2²⁴ blocks — 8 GiB @512, 16 GiB @1024, 32 GiB @2048</td>
+<td>block addresses are 3 bytes</td>
+</tr>
+<tr>
+<td>single file</td>
+<td>2 GiB</td>
+<td><code>di_size</code> is a signed 32-bit byte count</td>
+</tr>
+<tr>
+<td>inodes</td>
+<td>≈1M (≤ 65533 i-list blocks)</td>
+<td><code>s_isize</code> is a 16-bit field</td>
+</tr>
+<tr>
+<td>file name</td>
+<td>14 characters</td>
+<td>the directory entry is 2 + 14 bytes</td>
+</tr>
+<tr>
+<td>block size</td>
+<td>512, 1024, 2048</td>
+<td>the family maximum is <code>Fs4b</code></td>
+</tr>
+</tbody>
+</table>
+<p>Out of scope by design: V6 and 2.11BSD, FFS/UFS, and dynamic or differencing
+VHD.</p>
+<hr />
+<h2 id="9-exit-status">9. Exit status</h2>
+<p>Zero on success. Non-zero on a malformed or unreadable image, a failed
+operation, a <code>verify</code> that found differences, or an <code>fsck</code> that found errors it
+was not asked to repair.</p>
+<hr />
+<h2 id="10-examples">10. Examples</h2>
+<pre><code class="language-sh"># Build a bootable-shaped root from a host tree and check it
+s5fs mktree -d rl02 ./rootfs root.dsk
+s5fs boot root.dsk ./mdec/rlboot
+s5fs fsck root.dsk
+
+# Two filesystems in one whole-disk image, checked independently
+s5fs mkfs -d rp06 -P a disk.dsk
+s5fs mkfs -d rp06 -P c disk.dsk
+s5fs fsck -d rp06 -P a disk.dsk
+s5fs fsck -d rp06 -P c disk.dsk
+
+# Write a tape a real 2.9BSD restor(8) will read, framed for a SIMH drive
+s5fs dump -T root.dsk root.tap
+
+# Wrap for a hypervisor, and unwrap again
+s5fs vhd wrap root.dsk root.vhd
+s5fs vhd unwrap root.vhd root.back
+</code></pre>
+<p>Continue to the <a href="../design/index.html">design document</a> for the architecture, or to
+<a href="../on-disk-format/index.html"><code>on-disk-format.md</code></a> for the format itself.</p>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

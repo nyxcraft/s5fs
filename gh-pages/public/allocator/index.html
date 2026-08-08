@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The allocator: chained free list and rotational interleave | s5fs</title>
+  <meta name="description" content="Free space in s5fs is a chained list threaded through the free blocks themselves, laid out in a rotational permutation. It is not a bitmap, it is not an extent map, and it is not sorted.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">The allocator: chained free list and rotational interleave</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-the-structure">1. The structure</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-allocate-and-free">2. Allocate and free</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-the-rotational-interleave">3. The rotational interleave</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-mounting-an-existing-filesystem">4. Mounting an existing filesystem</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-why-undelete-is-impossible">5. Why undelete is impossible</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-for-a-maintainer">6. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>The allocator: chained free list and rotational interleave</h1>
+          <p class="docs-article__summary">Free space in s5fs is a chained list threaded through the free blocks themselves, laid out in a rotational permutation. It is not a bitmap, it is not an extent map, and it is not sorted.</p>
+          <p class="docs-article__source">The allocator: chained free list and rotational interleave</p>
+        </header>
+        <div class="prose">
+<p>Free space in s5fs is a <strong>chained list threaded through the free blocks
+themselves</strong>, laid out in a rotational permutation. It is not a bitmap, it is
+not an extent map, and it is not sorted. Almost everything surprising about
+this filesystem — why files aren't contiguous, why undelete is impossible, why
+<code>fsck</code> has to walk a chain rather than compare bitmaps — falls out of this one
+design.</p>
+<p>The code is <code>src/s5fs_core.c</code>, ported line-for-line from 2.9BSD <code>mkfs.c</code>
+(SCCS 2.5).</p>
+<hr />
+<h2 id="1-the-structure">1. The structure</h2>
+<p>The superblock caches up to <strong>50</strong> (<code>NICFREE</code>) block addresses. When they run
+out, the <em>last</em> one taken is not a data block at all — it is a chain block
+holding the next 50 addresses, and so on down the volume.</p>
+<pre><code>  superblock                chain block               chain block
+  ┌──────────────┐          ┌──────────────┐          ┌──────────────┐
+  │ s_nfree = 50 │          │ nfree = 50   │          │ nfree = 50   │
+  │ s_free[0] ───┼────────► │ free[0] ─────┼────────► │ free[0] ──►…  │
+  │ s_free[1..49]│          │ free[1..49]  │          │ free[1..49]  │
+  └──────────────┘          └──────────────┘          └──────────────┘
+     49 real free              49 real free              49 real free
+     blocks + a link           blocks + a link           blocks + a link
+</code></pre>
+<p><code>s_free[0]</code> is always the link. The chain terminates when that link is <strong>block
+0</strong> — which is why <code>mkfs</code> frees block 0 first, before any real block: it sinks
+to the bottom of the list and becomes the end marker.</p>
+<p>On-disk a chain block is just a count and an array:</p>
+<pre><code>  offset 0    2 bytes    nfree
+  offset 2  200 bytes    daddr_t[50]
+</code></pre>
+<hr />
+<h2 id="2-allocate-and-free">2. Allocate and free</h2>
+<p>Both operations are stack-like, on the superblock's cache:</p>
+<pre><code class="language-c">int32_t s5fs_alloc(S5FS *fs)
+{
+        fs-&gt;s_tfree--;
+        bno = fs-&gt;s_free[--fs-&gt;s_nfree];
+        if (bno == 0)                    /* hit the terminator: volume full */
+                return fail(&quot;out of free space&quot;);
+        if (fs-&gt;s_nfree &lt;= 0)            /* that block WAS the chain block */
+                s5fs_get_fblk(fs, bno);  /* read the next 50 out of it */
+        return bno;
+}
+
+void s5fs_bfree(S5FS *fs, int32_t bno)
+{
+        if (bno != 0)
+                fs-&gt;s_tfree++;
+        if (fs-&gt;s_nfree &gt;= P11_NICFREE) {
+                s5fs_put_fblk(fs, bno);  /* spill the full cache INTO bno */
+                fs-&gt;s_nfree = 0;
+        }
+        fs-&gt;s_free[fs-&gt;s_nfree++] = bno;
+}
+</code></pre>
+<p>Read those two carefully, because the whole document follows from them:</p>
+<ul>
+<li><strong>Allocation is LIFO.</strong> The last block freed is the first block handed out.</li>
+<li><strong>Emptying the cache consumes the chain block.</strong> When <code>s_nfree</code> reaches zero
+the block just popped is itself the link; its 50 addresses are read into the
+cache and the block is then handed to the caller as ordinary data.</li>
+<li><strong>Freeing periodically destroys data.</strong> When the cache is full, the block
+being freed is <em>overwritten</em> with the cache contents to become the new chain
+block. Roughly <strong>one freed block in fifty</strong> has its contents destroyed at the
+moment of deletion.</li>
+</ul>
+<p>That last point is not a bug and cannot be fixed — it is how the format stores
+its free list. It is also the reason <code>scavenge</code> is honest about what it can do
+(§5).</p>
+<hr />
+<h2 id="3-the-rotational-interleave">3. The rotational interleave</h2>
+<p>A 1980s disk had real rotational latency. Handing out block <em>n+1</em> right after
+block <em>n</em> was the worst case: by the time the driver issued the next request,
+the head had already passed the sector, costing a full revolution. So <code>mkfs</code>
+lays the free list out <strong>pre-scrambled</strong>, such that consecutively allocated
+blocks are physically spaced far enough apart that the next one arrives under
+the head just in time.</p>
+<p>Two superblock parameters describe it (<code>s_dinfo</code>, at offset 424): <strong><code>m</code></strong> the
+interleave gap and <strong><code>n</code></strong> the number of blocks in a rotation group. Defaults
+are <code>m = 5</code>, <code>n = 10</code>, clamped as the original does — <code>n</code> out of range becomes
+500, and an <code>m</code> out of range becomes 3.</p>
+<p>The permutation is built by stepping through a rotation group <code>m</code> at a time,
+skipping positions already taken:</p>
+<pre><code class="language-c">i = 0;
+for (j = 0; j &lt; fn; j++) {
+        while (flg[i]) i = (i + 1) % fn;   /* skip taken slots */
+        fs-&gt;adr[j] = i + 1;
+        flg[i]++;
+        i = (i + fm) % fn;                 /* step by the gap */
+}
+</code></pre>
+<p>With the defaults that yields <code>adr = [1, 6, 2, 7, 3, 8, 4, 9, 5, 10]</code>.</p>
+<p>The volume is then freed <strong>from the top down</strong>, one rotation group at a time,
+visiting each group in permuted order:</p>
+<pre><code class="language-c">s5fs_bfree(fs, 0);                    /* terminator, first so it sinks lowest */
+d = fsize - 1;
+while (d % fn) d++;                   /* round up to a group boundary */
+for (; d &gt; 0; d -= fn)
+        for (i = 0; i &lt; fn; i++) {
+                f = d - fs-&gt;adr[i];
+                if (f &lt; fsize &amp;&amp; f &gt;= isize)
+                        s5fs_bfree(fs, f);
+        }
+</code></pre>
+<p>Because freeing is LIFO and this runs high-to-low, <strong>allocation begins at the
+low end of the volume</strong> and walks upward — while, within each group of 10, the
+blocks come out spread across the rotation rather than in sequence.</p>
+<p>The practical upshot for a modern reader: <strong>a file's blocks are not
+contiguous and not monotonic.</strong> Anything that assumes otherwise — a carver, a
+&quot;read ahead N blocks&quot; optimization, a contiguity check — is wrong on a real
+image even when it happens to work on a freshly written one.</p>
+<hr />
+<h2 id="4-mounting-an-existing-filesystem">4. Mounting an existing filesystem</h2>
+<p><code>s5fs_mount</code> is the inverse of <code>s5fs_finish</code>: it reads block 1, decodes the
+superblock into the <code>S5FS</code> handle, and leaves the allocator ready to run
+against the <em>existing</em> free list. After that, <code>s5fs_alloc</code> and <code>s5fs_bfree</code>
+behave exactly as they do during <code>mkfs</code>.</p>
+<p><code>s5fs_finish</code> serializes the decoded superblock back to block 1. Every
+high-level operation in <a href="../mutation-engine/index.html"><code>mutation-engine.md</code></a> calls it
+before returning, so the image on disk is consistent after each call rather than
+only at close time.</p>
+<p>The inode side is simpler than the block side: <code>s5fs_ialloc</code> just hands out the
+next number (<code>++fs-&gt;ino</code>). The superblock's 100-entry free-inode cache
+(<code>s_inode</code>) is a kernel search accelerator; nothing here depends on it for
+correctness, and <code>fsck</code> recomputes the totals.</p>
+<hr />
+<h2 id="5-why-undelete-is-impossible">5. Why undelete is impossible</h2>
+<p>This is the question the design forces, so it is worth answering once,
+concretely. To recover a deleted file you would need to know <strong>which blocks it
+held</strong> and to find <strong>their contents intact</strong>. Both fail:</p>
+<ul>
+<li>The inode is cleared on unlink, so the block map is gone.</li>
+<li>Blocks were never contiguous (§3), so you cannot infer the map from a
+starting block.</li>
+<li>Roughly 1 in 50 freed blocks was overwritten by the free-list chain at the
+moment of deletion (§2), so even a correct guess hits destroyed data
+regularly.</li>
+</ul>
+<p>What <em>does</em> survive is the <strong>name</strong>: unlink zeroes only the directory entry's
+2-byte inode field, leaving the 14 name bytes in place. And file <em>content</em> can
+sometimes be identified by <strong>signature</strong> — <code>a.out</code>, <code>ar</code>, <code>tar</code>, plain text.</p>
+<p>So <code>scavenge</code> recovers deleted names and carves by signature, and its
+<code>build_used</code> walks the free-list chain specifically to <strong>exclude chain blocks
+from text carving</strong> — those blocks contain the list, not user data, and
+reporting them as recovered text would be noise.</p>
+<p>The command was renamed from <code>recover</code> to <code>scavenge</code> for exactly this reason.
+Keep the name and keep the documented limits honest; a user who expects
+<code>undelete</code> will be misled by anything more optimistic.</p>
+<hr />
+<h2 id="6-for-a-maintainer">6. For a maintainer</h2>
+<ul>
+<li><strong><code>s_free[0]</code> is the link, and block 0 terminates the chain.</strong> Free block 0
+first, before any real block.</li>
+<li><strong>Allocation is LIFO</strong>, so free order determines allocation order. Changing
+the free-list construction changes the on-disk layout of every file written
+afterwards.</li>
+<li><strong>Freeing destroys data every 50th block.</strong> Any &quot;recover&quot; feature has to be
+designed around this, not in spite of it.</li>
+<li><strong>The interleave permutation is <code>mkfs</code>'s, verbatim.</strong> It is part of what makes
+output byte-identical to the native tool; don't &quot;improve&quot; it.</li>
+<li><strong>You should almost never need to touch this file.</strong> New file operations
+belong in <code>s5fs_rw.c</code>; new formats belong in a <code>cmd_*.c</code>. Changes here move
+bytes in every image the tool has ever produced.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

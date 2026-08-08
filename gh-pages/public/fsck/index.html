@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The checker | s5fs</title>
+  <meta name="description" content="s5fs fsck verifies that an image is a consistent filesystem, and with -p repairs what can be repaired. icheck, dcheck, and clri are the same machinery exposed as the narrower historical tools.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">The checker</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-why-it-shares-no-code-with-the-writer">1. Why it shares no code with the writer</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-the-core-claim">2. The core claim</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-the-phases">3. The phases</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#phase-1-blocks">Phase 1 — blocks</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#phase-2-inodes-and-directories">Phase 2 — inodes and directories</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#phase-3-connectivity">Phase 3 — connectivity</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-the-orphan-directory-subtlety">4. The orphan-directory subtlety</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-repair-p">5. Repair (`-p`)</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-the-narrower-tools">6. The narrower tools</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#7-for-a-maintainer">7. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>The checker</h1>
+          <p class="docs-article__summary">s5fs fsck verifies that an image is a consistent filesystem, and with -p repairs what can be repaired. icheck, dcheck, and clri are the same machinery exposed as the narrower historical tools.</p>
+          <p class="docs-article__source">The checker</p>
+        </header>
+        <div class="prose">
+<p><code>s5fs fsck</code> verifies that an image is a consistent filesystem, and with <code>-p</code>
+repairs what can be repaired. <code>icheck</code>, <code>dcheck</code>, and <code>clri</code> are the same
+machinery exposed as the narrower historical tools.</p>
+<p>The code is <code>src/cmd_fsck.c</code>.</p>
+<hr />
+<h2 id="1-why-it-shares-no-code-with-the-writer">1. Why it shares no code with the writer</h2>
+<p>This is the design decision that makes the checker worth anything.</p>
+<p><code>cmd_fsck.c</code> has <strong>its own reader</strong> — its own <code>rdblk</code>, its own inode decode, its
+own <code>bmap</code>, its own directory walk. It shares nothing with <code>s5fs_core.c</code> except
+the structural constants in <code>pdp11fs.h</code> and the byte-order codecs in
+<code>s5endian.h</code>.</p>
+<p>That duplication is deliberate. A checker built on the writer's block-mapping
+code cannot detect a bug in the writer's block-mapping code — it would compute
+the same wrong answer twice and call it consistent. Because these are
+independent implementations of the same specification, <strong><code>s5fs fsck</code> is a
+genuine cross-check of <code>s5fs mkfs</code></strong>, and &quot;fsck clean&quot; after a mutation is
+evidence rather than a tautology.</p>
+<p>Do not refactor them together. The redundancy <em>is</em> the feature.</p>
+<hr />
+<h2 id="2-the-core-claim">2. The core claim</h2>
+<p>Everything the block check does is in service of one assertion:</p>
+<blockquote>
+<p>Every block in <code>[0, s_fsize)</code> belongs to <strong>exactly one</strong> of: reserved
+(boot, superblock, i-list), referenced by exactly one inode, or free.</p>
+</blockquote>
+<p>Not zero of them (a lost block), not two of them (a block both free and
+allocated, or multiply referenced — the corruption that silently destroys two
+files at once).</p>
+<p>The bookkeeping is one byte per block:</p>
+<pre><code class="language-c">uint8_t *use;   /* 0x7f = reference count (saturating) | 0x80 = on the free list */
+</code></pre>
+<p>The low seven bits count references and saturate rather than wrapping, so a
+badly corrupted image reports &quot;multiply referenced&quot; instead of counting back
+around to a plausible 1. The high bit is set by the free-list walk. At the end,
+a block with both bits set is <code>free AND used</code>; a block with neither is lost.</p>
+<hr />
+<h2 id="3-the-phases">3. The phases</h2>
+<p><code>fsck</code> runs both check groups (<code>CHK_BLOCKS | CHK_LINKS</code>); <code>icheck</code> runs blocks
+only, <code>dcheck</code> links only.</p>
+<h3 id="phase-1-blocks">Phase 1 — blocks</h3>
+<p>Walk every allocated inode's full block tree (direct + single/double/triple
+indirect) and mark each block, including the indirect blocks themselves. Two
+failures are reported here:</p>
+<ul>
+<li><strong>out of range</strong> — a block number outside <code>[s_isize, s_fsize)</code>, i.e. pointing
+into the reserved area or off the end of the volume;</li>
+<li><strong>multiply referenced</strong> — a block already marked by another inode.</li>
+</ul>
+<p>Then walk the free-list chain from the superblock, marking <code>0x80</code>, reporting a
+free block that is out of range or already marked used.</p>
+<p>Finally, sweep the volume: a block that is neither used nor free is <strong>lost</strong>,
+and the recomputed totals are compared with <code>s_tfree</code>/<code>s_tinode</code>.</p>
+<h3 id="phase-2-inodes-and-directories">Phase 2 — inodes and directories</h3>
+<p>Each allocated inode's mode is checked against the legal type set. Then every
+directory is walked, and for each entry:</p>
+<ul>
+<li>an inode number <strong>beyond the i-list</strong> is an error;</li>
+<li>an entry pointing at an <strong>unallocated inode</strong> is a <em>dangling reference</em>;</li>
+<li><code>.</code> that does not point at its own directory is an error;</li>
+<li>a running per-inode reference tally is accumulated.</li>
+</ul>
+<p>Afterwards the tally is compared with each inode's <code>di_nlink</code>. A mismatch is
+reported both ways round — &quot;free but <em>n</em> directories reference it&quot; and
+&quot;<code>di_nlink=n</code> but <em>m</em> directories reference it&quot; — because the two mean different
+things about what went wrong.</p>
+<h3 id="phase-3-connectivity">Phase 3 — connectivity</h3>
+<p>Depth-first from the root inode, marking everything reachable. Anything
+allocated but unreachable is an <strong>orphan</strong>.</p>
+<p>Inode 1 is marked reachable unconditionally: the bad-block list is legitimately
+referenced by no directory, and flagging it every run would train the reader to
+ignore orphan reports.</p>
+<hr />
+<h2 id="4-the-orphan-directory-subtlety">4. The orphan-directory subtlety</h2>
+<p>This is the trap in Phase 3, and it has to be stated because the obvious
+implementation is wrong.</p>
+<p><strong>A directory can never be found by looking for <code>nlink == 0</code>.</strong> Every directory
+contains <code>.</code>, which is a link to itself, so an orphaned directory still has
+<code>nlink ≥ 1</code> — and a directory with subdirectories has more. It is unreferenced
+by any <em>parent</em>, but its link count looks perfectly healthy.</p>
+<p>So orphan detection must be <strong>reachability from the root</strong>, not a link-count
+test. That is why Phase 3 exists as a separate DFS rather than being folded into
+Phase 2's counting. Keep it that way.</p>
+<hr />
+<h2 id="5-repair-p">5. Repair (<code>-p</code>)</h2>
+<p>Repair is conservative: it fixes what has an unambiguous correct answer and
+reports the rest.</p>
+<table>
+<thead>
+<tr>
+<th>problem</th>
+<th>repair</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>directory entry → free or out-of-range inode</td>
+<td>zero the entry's inode field</td>
+</tr>
+<tr>
+<td><code>di_nlink</code> disagrees with the directory count</td>
+<td>write the counted value</td>
+</tr>
+<tr>
+<td>orphaned inode</td>
+<td>reconnect into <code>/lost+found</code></td>
+</tr>
+<tr>
+<td>lost blocks / bad totals</td>
+<td>rebuild the free list and totals</td>
+</tr>
+</tbody>
+</table>
+<p>Zeroing the dangling entry is done first, because it changes the counts that
+the link-count fix then writes — doing it in the other order would install
+counts that include references about to be deleted.</p>
+<p>Reconnection needs somewhere to put things, which is why <code>mkfs</code> preallocates
+<code>/lost+found</code> with empty directory blocks at creation time: the reconnect path
+must be able to add entries without allocating a block in a filesystem whose
+free list is the thing currently under suspicion.</p>
+<p>Always re-run <code>fsck</code> after <code>-p</code>, and after any <code>fsdb -w</code> edit.</p>
+<hr />
+<h2 id="6-the-narrower-tools">6. The narrower tools</h2>
+<table>
+<thead>
+<tr>
+<th>command</th>
+<th>equals</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>icheck</code></td>
+<td><code>CHK_BLOCKS</code> only; <code>-s</code> salvages the free list</td>
+</tr>
+<tr>
+<td><code>dcheck</code></td>
+<td><code>CHK_LINKS</code> only</td>
+</tr>
+<tr>
+<td><code>clri</code></td>
+<td>zero an inode by number — a blunt instrument, no checking</td>
+</tr>
+<tr>
+<td><code>fsck -l</code></td>
+<td>the full check, plus a listing of the tree</td>
+</tr>
+</tbody>
+</table>
+<p><code>clri</code> deliberately does not validate; it is the escape hatch for an inode so
+corrupt that the checker cannot reason about it. Expect to run <code>fsck -p</code>
+afterwards to clean up the references it just orphaned.</p>
+<hr />
+<h2 id="7-for-a-maintainer">7. For a maintainer</h2>
+<ul>
+<li><strong>Never share code with the writer.</strong> The independence is what makes the
+check meaningful.</li>
+<li><strong>Orphan directories are not link-count-zero.</strong> Reachability, always (§4).</li>
+<li><strong>Reference counts saturate.</strong> Don't switch to a wrapping counter to save a
+byte.</li>
+<li><strong>Inode 1 is legitimately unreferenced.</strong> Keep it whitelisted.</li>
+<li><strong>Repair order matters</strong>: zero dangling entries <em>before</em> rewriting link
+counts.</li>
+<li><strong><code>fsck</code> prints <code>clean</code> on the last line</strong> when it finds nothing. The test
+suite matches on exactly that, so don't add trailing output after it.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

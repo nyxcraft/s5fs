@@ -434,7 +434,10 @@ def main() -> int:
     license_page = pages_by_slug.get("license")
     hero_primary = href_from(output_dir / "index.html", "user-guide")
     hero_secondary = href_from(output_dir / "index.html", "design")
-    year = str(datetime.date.today().year)
+    # Pinned in site.json so the build is reproducible: the committed gh-pages/public/ is
+    # diffed against a fresh build in CI, and a year that changed on its own every January
+    # would fail that check with nothing having been edited.
+    year = str(config.get("copyright_year") or datetime.date.today().year)
     copyright_holder = config.get("copyright", config["site_name"])
     status = config.get("status")
     status_badge = f'<span class="brand__badge">{escape(status)}</span>' if status else ""

@@ -13,17 +13,42 @@ gh-pages/
   check_links.py   fails if the built site links to something it lacks
   templates/       home.html, doc.html, page.html
   assets/          site.css, logo-s5fs.svg
-  public/          build output — gitignored, published by Actions
+  public/          build output — COMMITTED, and published by Actions
 ```
 
 ## Build it locally
 
 ```sh
-pip install markdown-it-py
+pip install 'markdown-it-py==3.0.0'
 python3 gh-pages/build_site.py
 python3 gh-pages/check_links.py
 python3 -m http.server -d gh-pages/public 8000   # then open localhost:8000
 ```
+
+## The committed build output
+
+`gh-pages/public/` is **committed**, so the built site can be read straight from
+the repo or served locally without anyone running a build first.
+
+Generated files in a repo go stale, and a stale docs site is invisible until
+somebody reads it — so CI rebuilds from source and **fails if the committed
+output differs**. After editing any Markdown:
+
+```sh
+python3 gh-pages/build_site.py && git add gh-pages/public
+```
+
+What gets *published* is always the fresh build in CI, never the committed copy;
+the committed copy is a convenience that CI holds to the truth.
+
+Two things exist only to keep that check honest, and both must stay:
+
+- **`markdown-it-py` is pinned** (`==3.0.0`) in the workflow. The check diffs
+  generated HTML, so an unpinned renderer would fail the build on its own
+  release schedule rather than on anything you did.
+- **`copyright_year` is pinned** in `site.json`. It used to come from
+  `date.today()`, which would have failed the check every January with nothing
+  edited. Remove the key and that behaviour comes back.
 
 ## How it is published
 

@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The interactive shell: a multi-mount VFS | s5fs</title>
+  <meta name="description" content="s5fs shell is not a single-image browser. It is a small virtual filesystem — any number of images mounted at arbitrary paths in one namespace, with every path routed to the image that serves it.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">The interactive shell: a multi-mount VFS</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-the-mount-table">1. The mount table</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-routing-longest-prefix-wins">2. Routing: longest prefix wins</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-virtual-directories">3. Virtual directories</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-cross-image-copy-and-the-host-escape">4. Cross-image copy and the host escape</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-why-the-shell-is-a-front-end">5. Why the shell is a front-end</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-for-a-maintainer">6. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>The interactive shell: a multi-mount VFS</h1>
+          <p class="docs-article__summary">s5fs shell is not a single-image browser. It is a small virtual filesystem — any number of images mounted at arbitrary paths in one namespace, with every path routed to the image that serves it.</p>
+          <p class="docs-article__source">The interactive shell: a multi-mount VFS</p>
+        </header>
+        <div class="prose">
+<p><code>s5fs shell</code> is not a single-image browser. It is a small virtual filesystem —
+any number of images mounted at arbitrary paths in one namespace, with every
+path routed to the image that serves it. That is what makes <code>cp</code> between two
+different disk images a single natural command rather than a two-step export and
+import.</p>
+<p>Code: <code>src/cmd_shell.c</code>. It is a front-end: every mutation goes through
+<a href="../mutation-engine/index.html"><code>s5fs_rw</code></a>, so the shell cannot diverge from the batch
+commands.</p>
+<hr />
+<h2 id="1-the-mount-table">1. The mount table</h2>
+<pre><code class="language-c">struct mount { char *at; char *img; RW h; int ro; };
+</code></pre>
+<p>Four fields: where it is mounted, what file it came from, its open read/write
+handle, and whether it is read-only. A launch image is auto-mounted at <code>/</code>, and
+starting with no image is fine — you mount things afterwards.</p>
+<pre><code>mount hostfile mnt [-r] [-B n] [-A bo] [-d dev -P part] [-o blk]
+umount mnt
+mounts
+</code></pre>
+<p>Each mount carries its own block size, byte order, and partition base, so
+<strong>images with different geometry coexist in one namespace</strong>. A 512-byte
+PDP-11 RL02 and a 2048-byte little-endian SysV volume can be mounted side by
+side and copied between; each <code>RW</code> handle holds its own decoded parameters.</p>
+<p>A write to a mount opened <code>-r</code> returns <code>Read-only file system</code> rather than
+failing some other way.</p>
+<hr />
+<h2 id="2-routing-longest-prefix-wins">2. Routing: longest prefix wins</h2>
+<p>Every path operation resolves through one function:</p>
+<pre><code class="language-c">static struct mount *route(const char *abspath, char *sub, size_t subsz);
+</code></pre>
+<p>It scans the table and keeps the mount with the <strong>longest matching mountpoint
+prefix</strong>, writing the remainder — the path <em>within that image</em>, always starting
+<code>/</code> — into <code>sub</code>.</p>
+<p>The matching has three cases, and all three are needed:</p>
+<pre><code class="language-c">if (strcmp(m-&gt;at, &quot;/&quot;) == 0)                                rem = abspath;
+else if (strcmp(abspath, m-&gt;at) == 0)                       rem = &quot;/&quot;;
+else if (!strncmp(abspath, m-&gt;at, L) &amp;&amp; abspath[L] == '/')  rem = abspath + L;
+</code></pre>
+<ul>
+<li>Root is special because it is the only mountpoint that is a prefix of
+everything without contributing a separator.</li>
+<li>An exact match on the mountpoint itself resolves to that image's root.</li>
+<li>Otherwise the next character <strong>must be <code>/</code></strong>. Without that test, a mount at
+<code>/usr</code> would capture <code>/usrlocal</code>, which is a different path entirely.</li>
+</ul>
+<p>Longest-prefix is what makes overlapping mounts behave: mount one image at
+<code>/usr</code> and another at <code>/usr/local</code>, and paths under <code>/usr/local</code> go to the
+deeper one while the rest of <code>/usr</code> goes to the shallower. Deeper wins,
+exactly as a real VFS shadows.</p>
+<hr />
+<h2 id="3-virtual-directories">3. Virtual directories</h2>
+<p>You can <code>cd</code> into a path that no mount claims, as long as it is an <strong>ancestor of
+some mountpoint</strong>:</p>
+<pre><code class="language-c">static int is_virtual_dir(const char *p);
+</code></pre>
+<p>Mount an image at <code>/a/b/c</code> and <code>/a</code> and <code>/a/b</code> become navigable even though no
+image backs them. Without this, mounting at a nested path would create a
+namespace you could not walk into — you would have to know the full path in
+advance and could never <code>ls</code> your way there.</p>
+<p>Virtual directories are navigable and listable, not writable. There is nowhere
+to put a file.</p>
+<hr />
+<h2 id="4-cross-image-copy-and-the-host-escape">4. Cross-image copy and the host escape</h2>
+<p><code>cp</code> and <code>mv</code> route <strong>each side independently</strong>. That is the whole trick:</p>
+<pre><code>mount a.dsk /a
+mount b.dsk /b
+cp /a/etc/passwd /b/tmp/passwd     # two different images, one command
+</code></pre>
+<p>Source and destination resolve to different <code>RW</code> handles, and
+<code>rw_copy_between</code> streams from one to the other without a host temporary.</p>
+<p>A leading <code>@</code> escapes to the <strong>host</strong> filesystem:</p>
+<pre><code>cp @./hostfile /a/tmp/x            # host  → image
+cp /a/etc/motd @./motd.txt         # image → host
+</code></pre>
+<p>So <code>cp</code> spans three namespaces — image, other image, host — through one
+syntax. <code>get</code> and <code>put</code> remain as the explicit forms for people who prefer
+them.</p>
+<p><code>mv</code> is a rename <strong>within one image</strong>; a cross-image <code>mv</code> is not a rename and is
+not silently emulated as copy-then-delete.</p>
+<hr />
+<h2 id="5-why-the-shell-is-a-front-end">5. Why the shell is a front-end</h2>
+<p>Every operation the shell offers — <code>mkdir</code>, <code>rm</code>, <code>chmod</code>, <code>put</code> — is an
+<code>rw_*</code> call. The shell contributes path resolution, the mount table, and
+command parsing, and contributes <strong>no filesystem logic at all</strong>.</p>
+<p>This is what makes the test suite's shell checks meaningful: a shell session
+that creates a directory, <code>cd</code>s into it, and puts a file must end <code>fsck clean</code>,
+and it does so for the same reason the batch commands do — it <em>is</em> the batch
+command underneath.</p>
+<p>If you extend the shell, respect <code>route()</code>, <code>parentof()</code>, and <code>rpath()</code>.
+Special-casing &quot;the single mount&quot; is the failure mode, because it works
+perfectly until someone mounts a second image.</p>
+<hr />
+<h2 id="6-for-a-maintainer">6. For a maintainer</h2>
+<ul>
+<li><strong>Never special-case a single mount.</strong> Everything routes, including <code>/</code>.</li>
+<li><strong>The prefix test needs the <code>/</code> check.</strong> <code>/usr</code> must not capture
+<code>/usrlocal</code>.</li>
+<li><strong>Longest prefix wins</strong>, so deeper mounts shadow shallower ones. Preserve the
+ordering, not the table order.</li>
+<li><strong>Resolve each side of <code>cp</code>/<code>mv</code> independently.</strong> That is what cross-image
+copy is.</li>
+<li><strong><code>@</code> is resolved here, in the front-end.</strong> Host paths never reach
+<code>s5fs_rw</code>.</li>
+<li><strong>No filesystem logic in this file.</strong> If you are writing a directory-entry
+offset, you are in the wrong layer.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

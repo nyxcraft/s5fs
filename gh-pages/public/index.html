@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>s5fs | Tools for the traditional Unix filesystem</title>
+  <meta name="description" content="Create, inspect, edit, repair and convert the V7 / System V filesystem — s5fs — as SIMH-style disk images, on a modern host, with no kernel support and nothing mounted. One faithful port of 2.9BSD&#x27;s filesystem writer underneath every command, so the images are the ones the era&#x27;s own fsck and kernel expect.">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body class="site-home">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header">
+      <a class="brand" href="index.html">
+        <img class="brand__icon" src="assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="overview/index.html">Overview</a>
+        <a href="design/index.html">Design</a>
+        <a href="user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="main-content" tabindex="-1">
+      <section class="hero">
+        <div class="hero__copy">
+          <h1>The filesystem UNIX shipped, on the machine you have.</h1>
+          <div class="hero__attr"><p>Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p></div>
+          <p class="hero__lede">Create, inspect, edit, repair and convert the V7 / System V filesystem — s5fs — as SIMH-style disk images, on a modern host, with no kernel support and nothing mounted. One faithful port of 2.9BSD&#x27;s filesystem writer underneath every command, so the images are the ones the era&#x27;s own fsck and kernel expect.</p>
+          <div class="hero__actions">
+            <a class="button button--primary" href="user-guide/index.html">Start here</a>
+            <a class="button" href="design/index.html">How it works</a>
+          </div>
+        </div>
+        <div class="hero__visual" role="img" aria-label="Every front end — mkfs, mktree, tar, restore and the interactive shell — funnels into one mutation engine over one ported filesystem writer, which produces a disk image the era's own fsck and kernel accept.">
+          <div class="flow">
+            <div class="flow__node flow__node--hub"><span>a host tree, a tar, a dump tape</span><strong>whatever you have</strong></div>
+            <div class="flow__arrow" aria-hidden="true">↓</div>
+            <div class="flow__fan">
+              <span>mkfs</span><span>mktree</span><span>tar</span><span>restore</span><span>shell</span>
+            </div>
+            <div class="flow__arrow" aria-hidden="true">↓</div>
+            <div class="flow__node"><span>one mutation engine, one writer core</span><strong>an image its own fsck accepts</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-strip" aria-label="Core ideas">
+        <article>
+          <h2>Exactly one mutation path</h2>
+          <p>One faithful port of 2.9BSD's <code>mkfs</code> owns the allocator and the inode and directory writers; one engine owns every high-level operation. The batch commands, the interactive shell and the FUSE mount all call it, so a front end cannot invent a subtly different filesystem, and a fix lands once.</p>
+        </article>
+        <article>
+          <h2>One structure, three byte orders</h2>
+          <p>s5fs had the same layout on every machine that ran it — only the encoding of multi-byte fields followed the CPU. No host struct is ever laid over disk bytes, so PDP-11 middle-endian, VAX and little-endian, and big-endian images all come out of the same writer.</p>
+        </article>
+        <article>
+          <h2>Byte fidelity, not “fsck is happy”</h2>
+          <p>A filesystem writer has a large space of outputs that pass every check you would naturally write and are still wrong. So the checker shares no code with the writer, and a tape written here is validated and rebuilt by the era's own <code>restor(8)</code> under emulation.</p>
+        </article>
+      </section>
+
+      <section class="docs-panel">
+        <div class="section-heading">
+          <p class="eyebrow">The documentation</p>
+          <h2>One binary, and the reasoning behind it.</h2>
+        </div>
+        <div class="tool-catalog">
+      <section class="tool-group">
+        <h3 class="tool-group__title">Start here</h3>
+        <div class="tool-grid">
+          <article class="tool-card">
+            <h4><a href="overview/index.html">Overview</a></h4>
+            <p class="tool-card__tagline">What it is, and every command</p>
+            <p>The quick reference: the full subcommand list, the common options, and a worked example of each major workflow.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="user-guide/index.html">User guide</a></h4>
+            <p class="tool-card__tagline">The manual</p>
+            <p>Task-oriented: making a filesystem, moving files in and out without mounting anything, the interactive shell, checking and repairing, and the limits.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="design/index.html">Design</a></h4>
+            <p class="tool-card__tagline">The architecture</p>
+            <p>The layer cake, the one-mutation-path rule that keeps every front-end honest, the design invariants, and what is deliberately out of scope.</p>
+          </article>
+        </div>
+      </section>
+      <section class="tool-group">
+        <h3 class="tool-group__title">The format</h3>
+        <div class="tool-grid">
+          <article class="tool-card">
+            <h4><a href="on-disk-format/index.html">The s5fs on-disk format</a></h4>
+            <p class="tool-card__tagline">What is on the platter</p>
+            <p>Superblock, inodes, directories and block maps, field by field — including the System V dialect and the block-size profiles that change how many address slots an inode has.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="byte-order/index.html">Byte order</a></h4>
+            <p class="tool-card__tagline">Three codecs, one structure</p>
+            <p>The same layout ran on machines that disagreed about integers. PDP-11 middle-endian, the l3 three-byte packing that is not a truncation of anything, and how a reader works out which it is looking at.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="allocator/index.html">The allocator: chained free list and rotational interleave</a></h4>
+            <p class="tool-card__tagline">The chained free list</p>
+            <p>Free space threaded through the free blocks themselves, laid out in a rotational permutation — and why that makes files non-contiguous and undelete impossible.</p>
+          </article>
+        </div>
+      </section>
+      <section class="tool-group">
+        <h3 class="tool-group__title">The engine</h3>
+        <div class="tool-grid">
+          <article class="tool-card">
+            <h4><a href="mutation-engine/index.html">The mutation engine</a></h4>
+            <p class="tool-card__tagline">The one write path</p>
+            <p>Two page-cache-coherent descriptors on one image, the block map, and the file operations that the batch commands, the shell and the FUSE mount all share.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="shell/index.html">The interactive shell: a multi-mount VFS</a></h4>
+            <p class="tool-card__tagline">A small VFS</p>
+            <p>Mount any number of images at arbitrary paths, route every path by longest prefix, and copy between two different disks in one command.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="fsck/index.html">The checker</a></h4>
+            <p class="tool-card__tagline">The independent checker</p>
+            <p>It shares no code with the writer on purpose, which is what makes a clean check evidence rather than a tautology. The three phases, the repairs, and the orphan-directory trap.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="containers/index.html">Containers: dump tapes, SIMH `.tap`, and fixed VHD</a></h4>
+            <p class="tool-card__tagline">Tapes and disk containers</p>
+            <p>The real 2.9BSD dump tape format, the SIMH .tap framing that wraps it, and the fixed-VHD footer that lets a hypervisor attach a raw image.</p>
+          </article>
+        </div>
+      </section>
+      <section class="tool-group">
+        <h3 class="tool-group__title">Reference</h3>
+        <div class="tool-grid">
+          <article class="tool-card">
+            <h4><a href="partitions/index.html">Disks and partitions</a></h4>
+            <p class="tool-card__tagline">Geometry without a label</p>
+            <p>There is nothing on the platter that says where a partition begins. The kernel had the table compiled in, and this mirrors it — plus the grow-only rule that keeps a whole-disk image intact.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="validation/index.html">Correctness: the standard and the evidence</a></h4>
+            <p class="tool-card__tagline">How correctness was established</p>
+            <p>The byte-fidelity standard, the three levels of evidence, what a native restor(8) proved that our own reader could not, and what a maintainer can re-run.</p>
+          </article>
+          <article class="tool-card">
+            <h4><a href="handoff/index.html">s5fs — engineering handoff</a></h4>
+            <p class="tool-card__tagline">For the next maintainer</p>
+            <p>The builder&#x27;s orientation: how the repo came to be, what to read in what order, the invariants to keep, and the already-fixed bugs not to reintroduce.</p>
+          </article>
+        </div>
+      </section>
+        </div>
+      </section>
+
+      <section class="docs-panel">
+        <div class="section-heading">
+          <p class="eyebrow">Documentation</p>
+          <h2>Start here.</h2>
+        </div>
+        <div class="doc-grid">
+<article class="doc-card">
+  <h3><a href="overview/index.html">Overview</a></h3>
+  <p>A single host multi-tool for building and inspecting the traditional PDP-11 Unix filesystem (retroactively s5fs) as SIMH .dsk images.</p>
+  <a class="doc-card__link" href="overview/index.html">Open</a>
+</article>
+<article class="doc-card">
+  <h3><a href="user-guide/index.html">User guide</a></h3>
+  <p>s5fs creates, inspects, edits, repairs, and converts disk images holding the traditional Unix filesystem — the V7 / System V filesystem, called s5fs.</p>
+  <a class="doc-card__link" href="user-guide/index.html">Open</a>
+</article>
+<article class="doc-card">
+  <h3><a href="design/index.html">Design</a></h3>
+  <p>This is the design of the whole toolkit: what it is, the one idea that shapes all of it, and how the subsystems fit together. For how to use it, see the user guide.</p>
+  <a class="doc-card__link" href="design/index.html">Open</a>
+</article>
+<article class="doc-card">
+  <h3><a href="on-disk-format/index.html">The s5fs on-disk format</a></h3>
+  <p>The reference for what actually sits on the platter. src/pdp11fs.h is the authoritative source — this document is its narrative form, explaining what the fields mean and which ones bite.</p>
+  <a class="doc-card__link" href="on-disk-format/index.html">Open</a>
+</article>
+<article class="doc-card">
+  <h3><a href="validation/index.html">Correctness: the standard and the evidence</a></h3>
+  <p>This toolkit is held to a byte-fidelity bar, not a &quot;seems to work&quot; bar.</p>
+  <a class="doc-card__link" href="validation/index.html">Open</a>
+</article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+</body>
+</html>

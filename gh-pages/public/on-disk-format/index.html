@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The s5fs on-disk format | s5fs</title>
+  <meta name="description" content="The reference for what actually sits on the platter. src/pdp11fs.h is the authoritative source — this document is its narrative form, explaining what the fields mean and which ones bite.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">The s5fs on-disk format</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-volume-layout">1. Volume layout</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#block-size-profiles">Block-size profiles</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-the-superblock-struct-filsys-block-1">2. The superblock (`struct filsys`, block 1)</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#the-system-v-dialect">The System V dialect</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-the-inode-struct-dinode-64-bytes">3. The inode (`struct dinode`, 64 bytes)</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#mode-bits">Mode bits</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#times">Times</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-the-block-map">4. The block map</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-directories">5. Directories</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#the-stale-buffer-trap">The stale-buffer trap</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-free-blocks">6. Free blocks</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#7-for-a-maintainer">7. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>The s5fs on-disk format</h1>
+          <p class="docs-article__summary">The reference for what actually sits on the platter. src/pdp11fs.h is the authoritative source — this document is its narrative form, explaining what the fields mean and which ones bite.</p>
+          <p class="docs-article__source">The s5fs on-disk format</p>
+        </header>
+        <div class="prose">
+<p>The reference for what actually sits on the platter. <code>src/pdp11fs.h</code> is the
+authoritative source — this document is its narrative form, explaining what the
+fields mean and which ones bite.</p>
+<p>Everything here is <strong>byte-order-independent</strong>: these are offsets and widths.
+How a multi-byte field is <em>encoded</em> is <a href="../byte-order/index.html"><code>byte-order.md</code></a>. The
+split is deliberate and worth preserving — see <a href="../design/index.html"><code>design.md</code></a> §3.</p>
+<p>Constants originate from the 2.9BSD headers (<code>&lt;sys/param.h&gt;</code>, <code>&lt;sys/ino.h&gt;</code>,
+<code>&lt;sys/inode.h&gt;</code>, <code>&lt;sys/filsys.h&gt;</code>, <code>&lt;sys/dir.h&gt;</code>, <code>&lt;sys/fblk.h&gt;</code>, and the
+UCB_NKB config) and were confirmed identical in V7 and 4.0/4.1.</p>
+<hr />
+<h2 id="1-volume-layout">1. Volume layout</h2>
+<pre><code>  block 0        boot block (never touched by the filesystem itself)
+  block 1        superblock (struct filsys)
+  blocks 2..     the i-list — s_isize - 2 blocks of inodes
+  blocks         data
+   s_isize..
+   s_fsize-1
+</code></pre>
+<p>Two inode numbers are reserved:</p>
+<table>
+<thead>
+<tr>
+<th>inode</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1</strong></td>
+<td>the bad-block list. Legitimately unreferenced by any directory.</td>
+</tr>
+<tr>
+<td><strong>2</strong></td>
+<td>the root directory.</td>
+</tr>
+</tbody>
+</table>
+<p>Inode numbering is 1-based and there is no inode 0 — a directory entry whose
+inode field is 0 is an <strong>empty slot</strong>, which is how deletion works and why
+<a href="https://github.com/nyxcraft/s5fs/blob/main/src/cmd_scavenge.c"><code>scavenge</code></a> can still find deleted names.</p>
+<h3 id="block-size-profiles">Block-size profiles</h3>
+<p>There is <strong>no on-disk marker for the block size</strong> in this V7-derived
+superblock. A reader has to be told, exactly as the era's compile-time <code>BSIZE</code>
+worked. Everything else derives from it:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>512</th>
+<th>1024</th>
+<th>2048</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>inodes per block (<code>inopb</code>)</td>
+<td>8</td>
+<td>16</td>
+<td>32</td>
+</tr>
+<tr>
+<td>block addrs per indirect (<code>nindir</code>)</td>
+<td>128</td>
+<td>256</td>
+<td>512</td>
+</tr>
+<tr>
+<td>dir entries per block (<code>ndirect</code>)</td>
+<td>32</td>
+<td>64</td>
+<td>128</td>
+</tr>
+<tr>
+<td><strong><code>naddr</code></strong> (di_addr slots)</td>
+<td><strong>13</strong></td>
+<td><strong>7</strong></td>
+<td><strong>13</strong></td>
+</tr>
+<tr>
+<td>direct slots (<code>laddr = naddr - 3</code>)</td>
+<td>10</td>
+<td>4</td>
+<td>10</td>
+</tr>
+<tr>
+<td>era</td>
+<td>V7</td>
+<td>2.xBSD (UCB)</td>
+<td>System V <code>Fs4b</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>naddr</code> is 7 at 1024, not 13.</strong> That is the UCB_NKB profile, and it is the
+single most surprising number in the format: the 1024-byte 2.xBSD filesystem
+has <em>fewer</em> address slots than the 512-byte V7 one, trading direct blocks for a
+smaller inode footprint. Getting this wrong produces a filesystem that reads
+correctly for small files and corrupts at the first indirect block.</p>
+<hr />
+<h2 id="2-the-superblock-struct-filsys-block-1">2. The superblock (<code>struct filsys</code>, block 1)</h2>
+<table>
+<thead>
+<tr>
+<th>offset</th>
+<th>field</th>
+<th>width</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>s_isize</code></td>
+<td>2</td>
+<td>first data block = 2 + i-list blocks</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>s_fsize</code></td>
+<td>4</td>
+<td>total blocks in the volume</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>s_nfree</code></td>
+<td>2</td>
+<td>valid entries in <code>s_free</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>s_free[50]</code></td>
+<td>200</td>
+<td>the free-block cache</td>
+</tr>
+<tr>
+<td>208</td>
+<td><code>s_ninode</code></td>
+<td>2</td>
+<td>valid entries in <code>s_inode</code></td>
+</tr>
+<tr>
+<td>210</td>
+<td><code>s_inode[100]</code></td>
+<td>200</td>
+<td>the free-inode cache</td>
+</tr>
+<tr>
+<td>410</td>
+<td><code>s_flock</code>,<code>s_ilock</code>,<code>s_fmod</code>,<code>s_ronly</code></td>
+<td>4</td>
+<td>in-core flags; zero on disk</td>
+</tr>
+<tr>
+<td>414</td>
+<td><code>s_time</code></td>
+<td>4</td>
+<td>last superblock update</td>
+</tr>
+<tr>
+<td>418</td>
+<td><code>s_tfree</code></td>
+<td>4</td>
+<td>total free blocks</td>
+</tr>
+<tr>
+<td>422</td>
+<td><code>s_tinode</code></td>
+<td>2</td>
+<td>total free inodes</td>
+</tr>
+<tr>
+<td>424</td>
+<td><code>s_dinfo[2]</code></td>
+<td>4</td>
+<td>the interleave <code>m</code>, <code>n</code></td>
+</tr>
+<tr>
+<td>428</td>
+<td><code>s_fsmnt[12]</code></td>
+<td>12</td>
+<td>mount-point name / volume label</td>
+</tr>
+<tr>
+<td>440</td>
+<td><code>s_lasti</code></td>
+<td>2</td>
+<td>inode-search hint</td>
+</tr>
+<tr>
+<td>442</td>
+<td><code>s_nbehind</code></td>
+<td>2</td>
+<td>inode-search hint; ends at 444</td>
+</tr>
+</tbody>
+</table>
+<p><code>s_isize</code> being a 16-bit field is where the <strong>≈1M inode ceiling</strong> comes from:
+at most 65533 i-list blocks.</p>
+<p><code>s_lasti</code> and <code>s_nbehind</code> are kernel search hints and carry no consistency
+meaning; nothing here depends on them.</p>
+<h3 id="the-system-v-dialect">The System V dialect</h3>
+<p><code>mkfs -F sysv</code> writes a second superblock flavor. The <strong>common part (0–417) is
+byte-identical</strong>; SysV then inserts <code>s_dinfo[4]</code> at 418, which pushes the
+totals later, and adds a magic and block-size type near the end of the block:</p>
+<table>
+<thead>
+<tr>
+<th>offset</th>
+<th>field</th>
+<th>width</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>418</td>
+<td><code>s_dinfo[4]</code></td>
+<td>8</td>
+<td>device info</td>
+</tr>
+<tr>
+<td>426</td>
+<td><code>s_tfree</code></td>
+<td>4</td>
+<td>total free blocks</td>
+</tr>
+<tr>
+<td>430</td>
+<td><code>s_tinode</code></td>
+<td>2</td>
+<td>total free inodes</td>
+</tr>
+<tr>
+<td>432</td>
+<td><code>s_fname[6]</code></td>
+<td>6</td>
+<td>filesystem name</td>
+</tr>
+<tr>
+<td>438</td>
+<td><code>s_fpack[6]</code></td>
+<td>6</td>
+<td>pack name</td>
+</tr>
+<tr>
+<td>500</td>
+<td><code>s_state</code></td>
+<td>4</td>
+<td>clean marker: <code>0x7c269d38 - s_time</code></td>
+</tr>
+<tr>
+<td>504</td>
+<td><code>s_magic</code></td>
+<td>4</td>
+<td><code>0xfd187e20</code></td>
+</tr>
+<tr>
+<td>508</td>
+<td><code>s_type</code></td>
+<td>4</td>
+<td>1 / 2 / 3 = 512 / 1024 / 2048</td>
+</tr>
+</tbody>
+</table>
+<p>The point of the design: <strong>all of that lands in the V7 layout's zeroed tail</strong>,
+so a SysV-flavored image still reads correctly as a plain image. The fields
+that matter for traversal — <code>isize</code>, <code>fsize</code>, the inode count, the directories,
+the free list — are dialect-independent. Only the totals move, and they are
+advisory.</p>
+<p><code>s_type</code> is the one place the block size <em>is</em> recorded, but only in this
+dialect, so it cannot be relied on generally.</p>
+<hr />
+<h2 id="3-the-inode-struct-dinode-64-bytes">3. The inode (<code>struct dinode</code>, 64 bytes)</h2>
+<table>
+<thead>
+<tr>
+<th>offset</th>
+<th>field</th>
+<th>width</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>di_mode</code></td>
+<td>2</td>
+<td>type + permission bits</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>di_nlink</code></td>
+<td>2</td>
+<td>link count</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>di_uid</code></td>
+<td>2</td>
+<td>owner</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>di_gid</code></td>
+<td>2</td>
+<td>group</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>di_size</code></td>
+<td>4</td>
+<td>size in bytes</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>di_addr[40]</code></td>
+<td>40</td>
+<td>up to 13 × 3-byte block numbers</td>
+</tr>
+<tr>
+<td>52</td>
+<td><code>di_atime</code></td>
+<td>4</td>
+<td>access time</td>
+</tr>
+<tr>
+<td>56</td>
+<td><code>di_mtime</code></td>
+<td>4</td>
+<td>modification time</td>
+</tr>
+<tr>
+<td>60</td>
+<td><code>di_ctime</code></td>
+<td>4</td>
+<td>inode-change time</td>
+</tr>
+</tbody>
+</table>
+<p><code>di_addr</code> is <strong>40 bytes holding 3-byte packed block numbers</strong> — 13 × 3 = 39,
+with a byte of slack. At the 1024 profile only the first 7 slots (21 bytes) are
+used and the rest are zero.</p>
+<p><code>di_size</code> is a <em>signed</em> 32-bit byte count, which is the <strong>2 GiB single-file
+limit</strong>.</p>
+<p>Inode <code>n</code> (1-based) lives at:</p>
+<pre><code>  block  = (n + 2*inopb - 1) / inopb
+  offset = ((n + 2*inopb - 1) % inopb) * 64
+</code></pre>
+<p>which places inode 1 at block 2 offset 0 — the arithmetic folds the i-list's
+two-block start offset into the division. It is written this way to match the
+original <code>itod</code>/<code>itoo</code> macros exactly.</p>
+<h3 id="mode-bits">Mode bits</h3>
+<table>
+<thead>
+<tr>
+<th>bits</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0170000</code></td>
+<td>type mask</td>
+</tr>
+<tr>
+<td><code>0040000</code></td>
+<td>directory</td>
+</tr>
+<tr>
+<td><code>0020000</code></td>
+<td>character special</td>
+</tr>
+<tr>
+<td><code>0060000</code></td>
+<td>block special</td>
+</tr>
+<tr>
+<td><code>0100000</code></td>
+<td>regular</td>
+</tr>
+<tr>
+<td><code>0004000</code> / <code>0002000</code> / <code>0001000</code></td>
+<td>setuid / setgid / sticky</td>
+</tr>
+<tr>
+<td><code>0000400</code> / <code>0000200</code> / <code>0000100</code></td>
+<td>read / write / execute (owner)</td>
+</tr>
+</tbody>
+</table>
+<p>A <strong>device node</strong> stores its major/minor packed as <code>(major &lt;&lt; 8) | minor</code> in
+<code>di_addr[0]</code> and has no data blocks.</p>
+<h3 id="times">Times</h3>
+<p>The writer treats <strong>zero as &quot;stamp with the superblock's time&quot;</strong> and any
+nonzero value as verbatim. That one rule is what lets <code>restore</code>, <code>tar x</code>, and
+<code>mktree</code> preserve real 1980s dates instead of rewriting history to the moment
+the image was built. It is an invariant, not a convenience — see
+<a href="../design/index.html"><code>design.md</code></a> §5.</p>
+<hr />
+<h2 id="4-the-block-map">4. The block map</h2>
+<p><code>di_addr</code> slots are read as: <code>laddr</code> direct, then single, double, and triple
+indirect. An indirect block is a flat array of 4-byte block numbers,
+<code>nindir</code> of them.</p>
+<table>
+<thead>
+<tr>
+<th>profile</th>
+<th>direct</th>
+<th>single</th>
+<th>double</th>
+<th>triple</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>512 (<code>laddr</code> 10)</td>
+<td>10</td>
+<td>+128</td>
+<td>+16 384</td>
+<td>+2 097 152</td>
+</tr>
+<tr>
+<td>1024 (<code>laddr</code> 4)</td>
+<td>4</td>
+<td>+256</td>
+<td>+65 536</td>
+<td>+16 777 216</td>
+</tr>
+<tr>
+<td>2048 (<code>laddr</code> 10)</td>
+<td>10</td>
+<td>+512</td>
+<td>+262 144</td>
+<td>+134 217 728</td>
+</tr>
+</tbody>
+</table>
+<p>Two writers build these maps, and the difference is deliberate:</p>
+<ul>
+<li><strong><code>s5fs_iput</code></strong> — the ported <code>mkfs</code> inode writer. Direct slots plus <em>one</em>
+level of single indirection, which is all <code>mkfs</code> ever needed for the root and
+<code>lost+found</code>. It is kept exactly as the original so the empty-filesystem path
+reproduces native <code>mkfs</code> byte-for-byte.</li>
+<li><strong><code>s5fs_setblocks</code></strong> — the general writer used by every front-end. Full
+direct + single/double/triple, allocating indirect blocks as it goes, so real
+files of any size can be stored.</li>
+</ul>
+<p>Do not merge them. The first one's fidelity is the thing being protected.</p>
+<hr />
+<h2 id="5-directories">5. Directories</h2>
+<p>A directory is an ordinary file whose contents are fixed 16-byte records:</p>
+<pre><code>  offset 0   2 bytes   inode number (0 = free slot)
+  offset 2  14 bytes   name, NUL-padded, NOT NUL-terminated when 14 chars
+</code></pre>
+<p>Consequences worth stating plainly:</p>
+<ul>
+<li><strong>Names are capped at 14 characters</strong> and a 14-character name has no
+terminator. Always copy into a 15-byte buffer and terminate by hand.</li>
+<li><strong>Deletion zeroes only the inode field.</strong> The name bytes stay. That is
+exactly what <code>scavenge</code> reads.</li>
+<li>Entry 0 is <code>.</code> and entry 1 is <code>..</code> by construction. The root's <code>..</code> points to
+itself.</li>
+<li>A directory's link count is 2 plus one per child subdirectory — so a
+directory is <strong>never</strong> link-count-zero, even when orphaned. See
+<a href="../fsck/index.html"><code>fsck.md</code></a> §4.</li>
+</ul>
+<h3 id="the-stale-buffer-trap">The stale-buffer trap</h3>
+<p><code>fsr_readfile</code> correctly clamps its read to the file's size. A loop that
+iterates all <code>ndirect</code> slots of the last block anyway will read <strong>leftover
+buffer bytes past the real directory size and invent ghost entries</strong> — this
+once produced 977 directory lines where 247 were real.</p>
+<p><strong>Bound directory iteration by the returned byte count</strong> (<code>e * 16 &lt; got</code>), never
+by slot capacity. This bug has been introduced twice, in <code>cmd_analysis.c</code> and
+<code>cmd_scavenge.c</code>. It will be introduced again.</p>
+<hr />
+<h2 id="6-free-blocks">6. Free blocks</h2>
+<p>Free space is a <strong>chained list</strong>, not a bitmap. The superblock caches 50
+addresses; when they run out, the last one points at a block holding the next
+50, and so on. The list is rotationally interleaved rather than sequential.</p>
+<p>That design has consequences well beyond allocation — it is why files are not
+contiguous and why undelete is impossible — so it has its own document:
+<a href="../allocator/index.html"><code>allocator.md</code></a>.</p>
+<p>The on-disk chain block is trivial:</p>
+<pre><code>  offset 0   2 bytes   count
+  offset 2   200 bytes daddr_t[50]
+</code></pre>
+<hr />
+<h2 id="7-for-a-maintainer">7. For a maintainer</h2>
+<ul>
+<li><strong><code>naddr</code> is 7 at 1024 and 13 at 512/2048.</strong> Not a typo. Small files will
+hide a mistake here.</li>
+<li><strong>Add a field by adding an offset here plus codec calls</strong> — never by declaring
+a <code>struct</code> over disk bytes. That is invariant #1.</li>
+<li><strong>14-character names have no terminator.</strong></li>
+<li><strong>Bound directory loops by bytes returned</strong>, not by <code>ndirect</code> (§5).</li>
+<li><strong>Zero time means &quot;now&quot;.</strong> Nonzero passes through verbatim.</li>
+<li><strong>The SysV dialect lives in the V7 tail</strong>, so it is additive; don't branch
+traversal on it.</li>
+<li><strong><code>s5fs_iput</code> is frozen for fidelity.</strong> New block-mapping work belongs in
+<code>s5fs_setblocks</code>.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

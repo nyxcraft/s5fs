@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>s5fs — engineering handoff | s5fs</title>
+  <meta name="description" content="You are picking up an essentially feature-complete host toolkit for creating, inspecting, editing, repairing, and converting the traditional PDP-11 Unix filesystem — retroactively called s5fs (the System-V / V7 filesyste…">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">s5fs — engineering handoff</span>
+    </nav>
+
+    <!-- Simple full-width page (no left rail, no section viewer) -- used for the long
+         reference pages that read as one continuous document. -->
+    <main id="main-content" class="page-main" tabindex="-1">
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>s5fs — engineering handoff</h1>
+          <p class="docs-article__summary">You are picking up an essentially feature-complete host toolkit for creating, inspecting, editing, repairing, and converting the traditional PDP-11 Unix filesystem — retroactively called s5fs (the System-V / V7 filesyste…</p>
+        </header>
+        <div class="prose">
+<p>You are picking up an essentially <strong>feature-complete</strong> host toolkit for creating,
+inspecting, editing, repairing, and converting the traditional PDP-11 Unix
+filesystem — retroactively called <strong>s5fs</strong> (the System-V / V7 filesystem) — as
+SIMH-style disk images. This document is the orientation an incoming engineer
+(human or agent) needs before touching the code. <code>README.md</code> is the user manual;
+this is the <em>builder's</em> manual: architecture, invariants, how correctness was
+established, what's deliberately out of scope, and where the bodies are buried.</p>
+<p>Read this top-to-bottom once, then keep §5 (invariants) and §9 (gotchas) nearby.</p>
+<p><strong><code>docs/</code> has the depth this document only summarizes</strong> — one file per
+subsystem, each ending in a maintainer checklist. Start with
+<a href="../design/index.html"><code>docs/design.md</code></a>; the format itself is
+<a href="../on-disk-format/index.html"><code>docs/on-disk-format.md</code></a>, the free list and the limits
+of recovery are <a href="../allocator/index.html"><code>docs/allocator.md</code></a>, and the evidence
+behind §8 is <a href="../validation/index.html"><code>docs/validation.md</code></a>. The full index is in
+<code>README.md</code>.</p>
+<hr />
+<h2 id="1-what-this-is-in-one-breath">1. What this is, in one breath</h2>
+<p>A single dependency-free C99 binary, <code>s5fs</code>, dispatched git-style
+(<code>s5fs &lt;command&gt; …</code>). One faithful port of 2.9BSD's <code>mkfs</code> filesystem writer sits
+at the bottom; every front-end (mkfs, tar, dump/restore, tree-from-host, the
+file commands, the FUSE mount) builds on that one allocator and inode/directory
+code, so <strong>there is exactly one mutation code path</strong> and it produces images the
+era's own <code>fsck</code> and kernel accept byte-for-byte.</p>
+<p>It is <strong>release-agnostic</strong>: the same writer covers V7, 2.8, 2.9, and 2.10,
+because they share the s5fs on-disk format byte-for-byte. It is also
+<strong>host-agnostic</strong>: all multi-byte on-disk fields go through a pluggable
+byte-order codec (PDP-11 middle-endian, little-endian VAX/x86, big-endian
+m68k), so the tool runs and the images are portable across any modern host.</p>
+<hr />
+<h2 id="2-how-this-repo-came-to-be-and-its-sibling">2. How this repo came to be (and its sibling)</h2>
+<p>This repo was <strong>split out of a larger monorepo</strong>, <code>~/pdp11-bsd29-toolchain</code>
+(a full 2.9BSD cross-toolchain: as, cc/c0/c1, ld, ar, nm, …). The filesystem
+work lived there under <code>diskimage/</code> and was extracted with
+<code>git subtree split --prefix=diskimage</code>, which reparented <code>diskimage/src → src</code>
+etc. and dropped every commit that didn't touch <code>diskimage/</code>. The result was
+pulled into this fresh repo. <strong>History is preserved</strong> — the 11 commits here are
+the real ones, authorship and dates intact.</p>
+<p>Consequences you should know:</p>
+<ul>
+<li><strong>Commit messages still carry the <code>diskimage:</code> prefix.</strong> That's the honest
+history from when this was a subdirectory. Don't be confused by it; there is
+no <code>diskimage/</code> directory here. Reword only if the owner asks (it rewrites
+hashes).</li>
+<li><strong>The monorepo is untouched and still has this code</strong> on its
+<code>diskimage-toolkit</code> branch. If you need to sync a fix back, that's the place.</li>
+<li><strong>The validation oracle lives in the monorepo, not here</strong> (see §8). This repo
+is source-only and builds/tests standalone; the <em>historical</em> 2.9 data,
+native tool binaries, and the apout/apsim emulators used to prove byte
+fidelity are all in the monorepo (and some of that data is copyright-encumbered
+and was never committable — see §8).</li>
+</ul>
+<hr />
+<h2 id="3-build-test-run">3. Build, test, run</h2>
+<p>Dependency-free by default — just a C99 compiler and make:</p>
+<pre><code class="language-sh">make            # builds bin/s5fs  (CFLAGS: -std=c99 -O2 -Wall -Wextra -pedantic)
+make test       # builds, then runs tests/run.sh  (self-contained, ~27 checks)
+make clean
+make FUSE=1     # additionally compiles the `mount`/`umount` subcommands
+                # (needs libfuse3-dev + pkg-config; everything else unchanged)
+</code></pre>
+<p><code>bin/</code> is gitignored. The default build has <strong>zero external dependencies</strong>;
+FUSE is the only optional extra and only affects two subcommands.</p>
+<p>The test suite (<code>tests/run.sh</code>) builds all its own fixtures — it needs no
+external 2.9 data — and every mutating flow ends by asserting <code>s5fs fsck</code> prints
+<code>clean</code>. It covers both layers and their seam: file ops, partitions, VHD, <code>.tap</code>
+framing, all three byte orders, 2048-byte/SysV superblocks, the oversize guard,
+fsdb, manifest/verify, scavenge, the analysis bundle, and the multi-mount shell.
+<strong>Keep it green; add a check for every new behavior.</strong></p>
+<hr />
+<h2 id="4-architecture">4. Architecture</h2>
+<h3 id="the-layer-cake-bottom-to-top">The layer cake (bottom to top)</h3>
+<pre><code>  s5endian.[ch]     pluggable byte-order codecs (put/get 16/24/32)   ← no fs knowledge
+  pdp11fs.h         on-disk STRUCTURE: field offsets, sizes, constants ← no byte order
+        │
+  fsread.[ch]       READ side: decode superblock (auto-detect BO), iget,
+                    namei, readdir, bmap (direct+1/2/3 indirect), readfile
+  s5fs_core.[ch]    WRITE side: the ported mkfs — superblock, chained free
+                    list w/ rotational interleave, inode/dir/indirect writers,
+                    block alloc/free, s5fs_mount() to load an existing image
+        │
+  s5fs_rw.[ch]      THE MUTATION ENGINE: one RW handle = {FSR read + S5FS write},
+                    two page-cache-coherent fds. mkdir/rmdir/unlink/rename/creat/
+                    chmod/chown/utimes/pwrite/truncate/put_fd/copy. All CLI file
+                    ops, the shell, and FUSE call THESE — nothing reimplements
+                    directory or block logic.
+  tree.[ch]         in-memory fs tree → tree_serialize(): for front-ends that
+                    receive entries in arbitrary order (tar, dump) and can't
+                    build in one forward pass
+        │
+  cmd_*.c           the subcommands (front-ends). Thin: parse args, drive the
+                    engine. s5fs.c is the ONLY main() and just routes.
+</code></pre>
+<p>Golden rule: <strong>read goes through <code>fsread</code>, write/allocate goes through
+<code>s5fs_core</code>, and everything user-facing that mutates goes through <code>s5fs_rw</code>.</strong>
+If you find yourself hand-rolling directory-entry or block-map math in a
+<code>cmd_*.c</code>, stop — the primitive you want already exists a layer down.</p>
+<h3 id="file-by-file-map">File-by-file map</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>s5fs.c</code></td>
+<td>dispatcher + <code>main()</code>; the subcommand table &amp; usage</td>
+</tr>
+<tr>
+<td><code>cmds.h</code></td>
+<td>every <code>cmd_*</code> entry-point prototype</td>
+</tr>
+<tr>
+<td><code>pdp11fs.h</code></td>
+<td>on-disk structural constants &amp; field offsets (byte-order-free)</td>
+</tr>
+<tr>
+<td><code>s5endian.[ch]</code></td>
+<td>the three codecs (<code>S5_PDP11</code>/<code>S5_LE</code>/<code>S5_BE</code>) + name parsing</td>
+</tr>
+<tr>
+<td><code>fsread.[ch]</code></td>
+<td>read-only reader (FSR)</td>
+</tr>
+<tr>
+<td><code>s5fs_core.[ch]</code></td>
+<td>writer core (S5FS); the ported <code>mkfs</code></td>
+</tr>
+<tr>
+<td><code>s5fs_rw.[ch]</code></td>
+<td>shared read+write mutation engine (RW)</td>
+</tr>
+<tr>
+<td><code>tree.[ch]</code></td>
+<td>arbitrary-order → serialized image</td>
+</tr>
+<tr>
+<td><code>device.[ch]</code></td>
+<td>PDP-11 disk geometry + compiled-in partition tables + advisory driver check</td>
+</tr>
+<tr>
+<td><code>fsutil.h</code></td>
+<td>presentation/<code>cp</code> helpers (implemented in <code>cmd_fs.c</code>)</td>
+</tr>
+<tr>
+<td><code>cmd_mkfs.c</code></td>
+<td><code>mkfs</code></td>
+</tr>
+<tr>
+<td><code>cmd_mktree.c</code></td>
+<td><code>mktree</code> (live host directory walk → image)</td>
+</tr>
+<tr>
+<td><code>cmd_tar.c</code></td>
+<td><code>tar c</code> (image→tar) / <code>tar x</code> (tar→image, handles .gz/.bz2/.Z)</td>
+</tr>
+<tr>
+<td><code>cmd_restore.c</code></td>
+<td><code>restore</code> (2.9 dump tape → image)</td>
+</tr>
+<tr>
+<td><code>cmd_dump.c</code></td>
+<td><code>dump</code> (image → 2.9 dump tape; <code>-T</code> for SIMH <code>.tap</code> framing)</td>
+</tr>
+<tr>
+<td><code>cmd_fsck.c</code></td>
+<td><code>fsck</code> (phases 1–3, <code>-p</code> repair, <code>-l</code> list) <strong>plus</strong> <code>icheck</code>, <code>dcheck</code>, <code>clri</code></td>
+</tr>
+<tr>
+<td><code>cmd_fsdb.c</code></td>
+<td><code>fsdb</code> interactive debugger (<code>-w</code> to edit)</td>
+</tr>
+<tr>
+<td><code>cmd_manifest.c</code></td>
+<td><code>manifest</code> + <code>verify</code> (mtree-style fingerprint/diff)</td>
+</tr>
+<tr>
+<td><code>cmd_scavenge.c</code></td>
+<td><code>scavenge</code> (deleted-name recovery + signature carving)</td>
+</tr>
+<tr>
+<td><code>cmd_analysis.c</code></td>
+<td><code>ncheck</code>, <code>quot</code>, <code>du</code>, <code>df</code>, <code>labelit</code></td>
+</tr>
+<tr>
+<td><code>cmd_util.c</code></td>
+<td><code>boot</code> (install block-0 bootstrap) + <code>devices</code></td>
+</tr>
+<tr>
+<td><code>cmd_vhd.c</code></td>
+<td><code>vhd</code> fixed-VHD wrap/unwrap/info</td>
+</tr>
+<tr>
+<td><code>cmd_fs.c</code></td>
+<td>the file commands: <code>ls cat get put cp mv rm mkdir rmdir chmod chown chgrp</code> + <code>fs_copy</code>/helpers</td>
+</tr>
+<tr>
+<td><code>cmd_shell.c</code></td>
+<td><code>shell</code> — interactive <strong>multi-mount VFS</strong> (see §6)</td>
+</tr>
+<tr>
+<td><code>cmd_mount.c</code></td>
+<td><code>mount</code>/<code>umount</code> FUSE wrapper (only compiled with <code>FUSE=1</code>)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-design-invariants-do-not-break-these">5. Design invariants — do not break these</h2>
+<ol>
+<li><strong>Never overlay a host struct on disk bytes.</strong> Every multi-byte field is
+read/written through an <code>s5_codec</code> (<code>get16/put16/get24/put24/get32/put32</code>).
+This is what makes the tool byte-order-portable and 64-bit-clean. Adding a
+field means adding an offset in <code>pdp11fs.h</code> and codec calls — not a <code>struct</code>.</li>
+<li><strong>One mutation path.</strong> New file-manipulation features extend <code>s5fs_rw.c</code>, and
+the CLI/shell/FUSE all call it. Don't fork the logic.</li>
+<li><strong>Consistency after every op.</strong> High-level <code>rw_*</code> ops flush the superblock
+(<code>rw_sync</code>) before returning, so the image on disk is valid after each call.
+Preserve that; the test suite asserts <code>fsck clean</code> after mutations.</li>
+<li><strong>Block addresses are 24-bit (3-byte l3-packed).</strong> Hence the hard ceiling of
+<code>P11_MAXFSBLKS = 2^24</code> blocks, enforced in <code>s5fs_begin</code>. Don't remove the guard.</li>
+<li><strong>Block size ∈ {512, 1024, 2048} only</strong> (<code>P11_BSIZE_OK</code>). 2048 is the s5fs
+family maximum (SysV Fs4b); larger blocks are FFS, a <em>different</em> filesystem.
+NADDR is <strong>13</strong> for 512/2048 and <strong>7</strong> for 1024 (the UCB_NKB profile). Default
+bsize is <strong>1024</strong>.</li>
+<li><strong>Times are preserved, not stamped.</strong> Inodes carry atime/mtime/ctime; a value
+of 0 means &quot;stamp with the superblock time (now)&quot;, any nonzero value is
+written through verbatim. Restore/tar-x/mktree must keep 1980s dates intact —
+there is a regression here (see §9); don't reintroduce &quot;stamp everything now&quot;.</li>
+<li><strong>Partitions are a base-block offset, full stop.</strong> There is no on-disk label.
+A partition is <code>minor(dev)&amp;7</code> indexing the kernel driver's compiled-in
+<code>*_sizes[]</code> table, which we mirror in <code>device.c</code>. <code>base</code> (a byte offset)
+threads through <code>fsread</code>, <code>s5fs_core</code>, and <code>s5fs_rw</code>. Whole-disk operations on
+a partition must be <strong>grow-only</strong> for the file (never <code>ftruncate</code> a whole-disk
+image down to one partition's size — that bug was fixed once already).</li>
+<li><strong><code>-pedantic</code> clean, C99, no GCC-isms.</strong> No <code>typeof</code>, no VLAs-as-struct-members,
+include <code>&lt;unistd.h&gt;</code> where you use <code>getopt</code>, match <code>%lo</code>/<code>%ld</code> to the actual
+type. The build must stay warning-free under <code>-Wall -Wextra -pedantic</code>.</li>
+</ol>
+<hr />
+<h2 id="6-two-subsystems-worth-understanding-before-you-touch-them">6. Two subsystems worth understanding before you touch them</h2>
+<p><strong>The multi-mount shell (<code>cmd_shell.c</code>).</strong> The interactive explorer is a small
+VFS, not a single-image browser. You <code>mount &lt;img&gt; &lt;at&gt;</code> any number of images at
+arbitrary virtual paths; <code>route(abspath)</code> picks the <strong>longest-prefix</strong> mount, so
+overlapping mounts shadow correctly (deeper wins). <code>cp</code>/<code>mv</code> resolve each side
+independently, so you can copy <strong>between different images</strong> in one command, and a
+leading <code>@</code> on a path escapes to the <strong>host</strong> filesystem. The launch image
+auto-mounts at <code>/</code>. Virtual (unmounted) intermediate directories are navigable
+with <code>cd</code>. If you extend it, respect <code>route()</code>/<code>parentof()</code>/<code>rpath()</code> — don't
+special-case single-mount.</p>
+<p><strong>dump/restore + containers (<code>cmd_dump.c</code>, <code>cmd_vhd.c</code>).</strong> <code>dump</code> emits the real
+2.9BSD <code>dump(8)</code>/<code>restor</code> tape format (MAGIC 60011, <code>spcl</code> records, checksum =
+<code>CHECKSUM(84446) - sum16</code>), byte-order-aware. <code>-T</code> wraps it in SIMH <code>.tap</code> framing
+(each <code>NTREC</code>-block record bracketed by a 4-byte LE length, two tape marks at
+end). Round-trips are validated against the <strong>native</strong> <code>restor(8)</code> running under
+the emulator. <code>vhd</code> appends a 512-byte fixed-VHD footer (cookie <code>conectix</code>, CHS
+per the spec algorithm, ones-complement checksum); <strong>dynamic VHD is out of scope.</strong>
+When wrapping, always <code>lseek(SEEK_END)</code> before writing the footer (append, don't
+overwrite — that bug was fixed once).</p>
+<hr />
+<h2 id="7-on-disk-format-cheat-sheet">7. On-disk format cheat-sheet</h2>
+<p>The authoritative reference is <code>pdp11fs.h</code> (heavily commented). Essentials:</p>
+<ul>
+<li>Block 0 = boot, block 1 = superblock (<code>struct filsys</code>), i-list starts block 2.</li>
+<li>Inode 1 = bad-block list, inode 2 = root directory.</li>
+<li>dinode = 64 bytes; 13 (or via profile) 3-byte block addrs at offset 12;
+atime/mtime/ctime at 52/56/60.</li>
+<li>Directory entry = 16 bytes: 2-byte inode number + 14-byte name.</li>
+<li>Free blocks are a <strong>chained free list</strong> (superblock caches <code>NICFREE=50</code>
+addresses; the last points to a block holding the next 50…). The list is
+<strong>rotationally interleaved</strong>, so files are <em>not</em> laid out contiguously — this
+is why undelete is limited (§9).</li>
+<li><strong>SysV superblock dialect</strong> (<code>mkfs -F sysv</code>): shares the common part
+(offsets 0–417) with V7, then inserts <code>s_dinfo[4]</code>@418 (pushing tfree→426,
+tinode→430) and adds <code>s_state</code>@500, <code>s_magic</code>@504 (<code>0xfd187e20</code>),
+<code>s_type</code>@508 (1/2/3 = 512/1024/2048). All of that lands in the V7 layout's
+zeroed tail, so a SysV image still reads fine as a plain image.</li>
+</ul>
+<hr />
+<h2 id="8-how-correctness-was-established-and-how-to-re-verify">8. How correctness was established (and how to re-verify)</h2>
+<p>This toolkit was held to a <strong>byte-fidelity</strong> bar, the same one the cross
+<code>as</code>/<code>cc</code> in the monorepo meet. Don't settle for &quot;fsck is happy&quot; when you can
+prove exactness. The evidence base:</p>
+<ul>
+<li><strong>Native-tool oracle (in the monorepo).</strong> The historical 2.9BSD <code>mkfs</code>,
+<code>restor</code>, <code>fsck</code>, etc. are run under <strong>apout/apsim</strong> (PDP-11 user-mode
+emulators) and diffed against our output. Full dump/restore round-trips were
+proven byte-identical, and our tapes validate + rebuild under the <em>native</em>
+<code>restor(8)</code>. Elsewhere in the toolchain, cross-built binaries (e.g. rogue 3.6)
+came out <strong>bit-for-bit identical</strong> to the shipped originals — that's the
+standard to aim for.</li>
+<li><strong><code>fsck clean</code> after every mutation</strong> — enforced by the test suite.</li>
+<li><strong>Superblock/format round-trips</strong> — SysV magic, byte order, 2048-byte blocks,
+<code>.tap</code> un-framing == flat dump, VHD footer checksum, all asserted.</li>
+</ul>
+<p><strong>Caveat for a future agent:</strong> the emulators, the native tool binaries, the
+<code>mdec</code> boot blocks, and the original release trees (<code>~/bsd/2.9</code>, <code>~/rogue*</code>)
+live in / around the monorepo. Some of that is <strong>copyright-encumbered</strong>: it is
+usable locally for validation but was <strong>never committed</strong> and must not be. Treat
+<code>~/bsd/2.9</code> and <code>~/rogue*</code> as <strong>read-only originals</strong>. This <code>s5fs</code> repo is clean,
+original C — keep it that way; don't vendor copyrighted data into it.</p>
+<hr />
+<h2 id="9-gotchas-already-fixed-bugs-don-t-reintroduce">9. Gotchas &amp; already-fixed bugs (don't reintroduce)</h2>
+<ul>
+<li><strong>Stale-buffer directory over-read.</strong> <code>fsr_readfile</code> clamps to the file/dir
+size, but naive loops over all <code>NDIRECT</code> slots read leftover buffer bytes past
+the real directory size, inventing ghost entries (once produced 977 dir lines
+vs 247 real). <strong>Always bound directory iteration by the returned byte count</strong>
+(<code>e*P11_DIRENTSZ &lt; got</code>), not by slot capacity. This bit both <code>cmd_analysis.c</code>
+and <code>cmd_scavenge.c</code>.</li>
+<li><strong>Whole-disk <code>ftruncate</code> shrink.</strong> <code>mkfs -P</code> on a partition of a whole-disk
+image must not truncate the file down to the partition size. <code>s5fs_begin</code> is
+base-aware and grow-only when <code>base != 0</code>. (Caught via <code>strace</code> — double
+ftruncate.)</li>
+<li><strong>VHD footer overwrite.</strong> See §6 — append at <code>SEEK_END</code>.</li>
+<li><strong>Orphan <em>directories</em> aren't linkcount-0.</strong> A directory always has <code>nlink ≥ 1</code>
+from its own <code>.</code>, so fsck Phase 3 detects orphaned directories by
+<strong>reachability DFS from root</strong>, not by <code>nlink == 0</code>. Keep it.</li>
+<li><strong>Times stamped &quot;now&quot; (LIVE ISSUE / deferred).</strong> mktree currently does <em>not</em>
+preserve host directory / device-node mtimes in all paths — the atime/mtime/
+ctime plumbing exists and works for files, but finishing full time-preservation
+in <code>mktree</code> for dirs/devnodes was explicitly deferred, not done. If you touch
+mktree, this is the first thing to finish.</li>
+<li><strong><code>scavenge</code> is honest, not magic.</strong> Because the free list is chained <em>through</em>
+freed blocks (~1 in 50 gets overwritten by the chain itself) and files aren't
+contiguous, real undelete is impossible. <code>scavenge</code> recovers <strong>deleted names</strong>
+(ghost directory entries) and does <strong>signature carving</strong> (a.out/ar/tar/text);
+its <code>build_used</code> follows the free-list chain and excludes chain blocks from
+&quot;text&quot; carving. It was renamed from <code>recover</code> precisely so nobody expects
+<code>undelete</code>. Keep the naming and the documented limits honest.</li>
+</ul>
+<hr />
+<h2 id="10-scope-boundaries-deliberate-don-t-fix-these">10. Scope boundaries (deliberate — don't &quot;fix&quot; these)</h2>
+<ul>
+<li><strong>s5fs family only:</strong> V7 / 2.8 / 2.9 / 2.10 (and other s5fs hosts via the
+codec). <strong>V6 and 2.11 are out of scope.</strong> FFS/UFS is a different filesystem.</li>
+<li><strong>Max filesystem:</strong> 2^24 blocks → 8 GiB @512 / 16 GiB @1024 / 32 GiB @2048.</li>
+<li><strong>Max file:</strong> 2 GiB (<code>di_size</code> is a signed 32-bit byte count).</li>
+<li><strong>Fixed VHD only</strong> (raw + footer). Dynamic/differencing VHD is out of scope.</li>
+<li><strong>A previously-considered &quot;rebuild the whole OS from source to a bootable
+disk&quot; end-goal was explicitly DROPPED.</strong> This toolkit is the finished
+deliverable in its own right; do <strong>not</strong> propose or resurrect the
+source→disk-rebuild pipeline as the reason this exists.</li>
+</ul>
+<hr />
+<h2 id="11-conventions">11. Conventions</h2>
+<ul>
+<li><strong>Commits:</strong> directly on <code>main</code>. <strong>No <code>Co-Authored-By</code> trailers</strong> — the history
+was rewritten once to strip them, so adding one back reintroduces what that
+rewrite removed.</li>
+<li><strong>Nothing gets pushed to any remote</strong> without an explicit ask.</li>
+<li><strong>No external dependencies</strong> in the default build. FUSE is the sole opt-in.</li>
+<li><strong>Style:</strong> match the surrounding code — tabs, terse comments that explain
+<em>why</em>, block comments at the top of each file stating that file's contract.
+Keep every new subcommand thin and route it through the shared engine.</li>
+<li><strong>Tests are not optional.</strong> New behavior → new check in <code>tests/run.sh</code>, and it
+must end <code>fsck clean</code> if it mutates.</li>
+</ul>
+<hr />
+<h2 id="12-suggested-first-moves-for-the-incoming-engineer">12. Suggested first moves for the incoming engineer</h2>
+<ol>
+<li><code>make &amp;&amp; make test</code> — confirm 27/27 green on your host.</li>
+<li>Read in this order: <code>pdp11fs.h</code> → <code>s5endian.h</code> → <code>fsread.h</code> → <code>s5fs_core.h</code>
+→ <code>s5fs_rw.h</code> → <code>s5fs.c</code>. That's the whole design in ~6 headers.</li>
+<li>Skim <code>tests/run.sh</code> — it's the fastest tour of what the tool actually does.</li>
+<li>Only then open a <code>cmd_*.c</code>. They're thin; the interesting logic is underneath.</li>
+</ol>
+<p>If you're extending: new <em>file operation</em> → <code>s5fs_rw.c</code> + wire into <code>cmd_fs.c</code>
+and <code>cmd_shell.c</code>; new <em>format/container</em> → new <code>cmd_*.c</code> front-end over the
+existing reader/writer; new <em>host byte order</em> → a codec in <code>s5endian.c</code> (+ maybe
+a <code>device.c</code> entry). You should almost never need to touch the free-list or
+inode-writer internals in <code>s5fs_core.c</code>.</p>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+</body>
+</html>

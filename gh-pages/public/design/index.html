@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Design | s5fs</title>
+  <meta name="description" content="This is the design of the whole toolkit: what it is, the one idea that shapes all of it, and how the subsystems fit together. For how to use it, see the user guide.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">Design</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-what-this-is">1. What this is</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-the-one-idea-exactly-one-mutation-path">2. The one idea: exactly one mutation path</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-the-layer-cake">3. The layer cake</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#file-map">File map</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-the-subsystems">4. The subsystems</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-design-invariants">5. Design invariants</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-scope-boundaries">6. Scope boundaries</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#7-testing">7. Testing</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#8-for-a-maintainer">8. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>Design</h1>
+          <p class="docs-article__summary">This is the design of the whole toolkit: what it is, the one idea that shapes all of it, and how the subsystems fit together. For how to use it, see the user guide.</p>
+          <p class="docs-article__source">s5fs — design</p>
+        </header>
+        <div class="prose">
+<p>This is the design of the whole toolkit: what it is, the one idea that shapes all
+of it, and how the subsystems fit together. For how to <em>use</em> it, see the
+<a href="../user-guide/index.html">user guide</a>. Each subsystem has its own document for the depth
+this one only points at.</p>
+<hr />
+<h2 id="1-what-this-is">1. What this is</h2>
+<p><code>s5fs</code> is a <strong>host-side toolkit for the traditional Unix filesystem</strong> — the V7 /
+System V filesystem, retroactively called <strong>s5fs</strong>. On a modern LP64 host it
+creates, inspects, edits, repairs, and converts s5fs volumes as SIMH-style disk
+images, and it does so faithfully enough that the era's own <code>fsck</code> and kernel
+accept the result byte-for-byte.</p>
+<p>One dependency-free C99 binary, dispatched git-style (<code>s5fs &lt;command&gt; …</code>), with
+36 subcommands over a single shared engine. The default build has <strong>zero
+external dependencies</strong>; FUSE is the only opt-in, and it affects exactly two
+subcommands.</p>
+<p>Two properties define the whole design:</p>
+<ul>
+<li><strong>Release-agnostic.</strong> V7, 2.8BSD, 2.9BSD, and 2.10BSD share the s5fs on-disk
+format byte-for-byte, so one writer covers all of them. There is no
+per-release code path anywhere in the tree.</li>
+<li><strong>Host-agnostic.</strong> Every multi-byte on-disk field goes through a pluggable
+byte-order codec, so the tool runs — and the images it makes are correct — on
+any modern host, for any of the three CPU regimes that ran this filesystem.</li>
+</ul>
+<hr />
+<h2 id="2-the-one-idea-exactly-one-mutation-path">2. The one idea: exactly one mutation path</h2>
+<p>The thing that keeps this toolkit honest is a rule about <em>code</em>, not about
+format: <strong>there is exactly one path that mutates an image.</strong></p>
+<p>One faithful port of 2.9BSD's <code>mkfs</code> sits at the bottom and owns the allocator,
+the inode writer, and the directory writer. Above it, one mutation engine
+(<code>s5fs_rw</code>) owns every high-level operation — mkdir, unlink, rename, truncate,
+pwrite, chmod. Above <em>that</em>, every front-end that can change an image — the
+batch file commands, the interactive shell, the FUSE mount, <code>tar x</code>, <code>restore</code>,
+<code>mktree</code> — calls those same primitives.</p>
+<p>The payoff is that a front-end cannot invent a subtly different filesystem.
+<code>tar x</code> and the FUSE mount lay out directories identically because they are
+running the same <code>rw_mkdir</code>. A correctness fix lands once and every subcommand
+inherits it. It is also why the test suite can assert <code>fsck clean</code> after every
+mutating flow and have that mean something: there is only one thing to check.</p>
+<p>The corresponding rule for a maintainer: <strong>if you are writing directory-entry or
+block-map arithmetic inside a <code>cmd_*.c</code>, stop.</strong> The primitive already exists a
+layer down.</p>
+<hr />
+<h2 id="3-the-layer-cake">3. The layer cake</h2>
+<pre><code>  s5endian.[ch]   pluggable byte-order codecs (put/get 16/24/32)  ← no fs knowledge
+  pdp11fs.h       on-disk STRUCTURE: field offsets, sizes, consts ← no byte order
+        │
+  fsread.[ch]     READ side: decode superblock (auto-detect byte order), iget,
+                  namei, readdir, bmap (direct + 1/2/3 indirect), readfile
+  s5fs_core.[ch]  WRITE side: the ported mkfs — superblock, chained free list
+                  with rotational interleave, inode/dir/indirect writers, block
+                  alloc/free, s5fs_mount() to load an existing image
+        │
+  s5fs_rw.[ch]    THE MUTATION ENGINE: one RW handle = {FSR read + S5FS write},
+                  two page-cache-coherent fds
+  tree.[ch]       in-memory fs tree → tree_serialize(), for front-ends that
+                  receive entries in arbitrary order (tar, dump)
+        │
+  cmd_*.c         the subcommands. Thin: parse args, drive the engine.
+                  s5fs.c is the ONLY main() and just routes.
+</code></pre>
+<p>The two bottom layers are deliberately split along an axis that is easy to get
+wrong. <code>pdp11fs.h</code> knows <strong>where</strong> every field sits and <strong>how wide</strong> it is, and
+knows nothing about byte order. <code>s5endian.[ch]</code> knows how to encode an integer
+and nothing about filesystems. Neither can be corrupted by a change to the
+other, and adding a field is adding an offset plus codec calls — never a
+<code>struct</code>.</p>
+<p>The read and write sides are also deliberately independent. <code>fsread</code> shares no
+logic with <code>s5fs_core</code> beyond the structural constants and the codecs, which is
+what makes <code>s5fs fsck</code> a genuine cross-check of <code>s5fs mkfs</code> rather than a
+restatement of it. See <a href="../fsck/index.html"><code>fsck.md</code></a>.</p>
+<h3 id="file-map">File map</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>s5fs.c</code></td>
+<td>dispatcher + <code>main()</code>; the subcommand table &amp; usage</td>
+</tr>
+<tr>
+<td><code>cmds.h</code></td>
+<td>every <code>cmd_*</code> entry-point prototype</td>
+</tr>
+<tr>
+<td><code>pdp11fs.h</code></td>
+<td>on-disk structural constants &amp; field offsets (byte-order-free)</td>
+</tr>
+<tr>
+<td><code>s5endian.[ch]</code></td>
+<td>the three codecs (<code>S5_PDP11</code>/<code>S5_LE</code>/<code>S5_BE</code>) + name parsing</td>
+</tr>
+<tr>
+<td><code>fsread.[ch]</code></td>
+<td>read-only reader (FSR)</td>
+</tr>
+<tr>
+<td><code>s5fs_core.[ch]</code></td>
+<td>writer core (S5FS); the ported <code>mkfs</code></td>
+</tr>
+<tr>
+<td><code>s5fs_rw.[ch]</code></td>
+<td>shared read+write mutation engine (RW)</td>
+</tr>
+<tr>
+<td><code>tree.[ch]</code></td>
+<td>arbitrary-order entries → serialized image</td>
+</tr>
+<tr>
+<td><code>device.[ch]</code></td>
+<td>disk geometry, compiled-in partition tables, advisory driver check</td>
+</tr>
+<tr>
+<td><code>fsutil.h</code></td>
+<td>presentation / <code>cp</code> helpers (implemented in <code>cmd_fs.c</code>)</td>
+</tr>
+<tr>
+<td><code>cmd_mkfs.c</code></td>
+<td><code>mkfs</code></td>
+</tr>
+<tr>
+<td><code>cmd_mktree.c</code></td>
+<td><code>mktree</code> (live host directory walk → image)</td>
+</tr>
+<tr>
+<td><code>cmd_tar.c</code></td>
+<td><code>tar c</code> / <code>tar x</code> (handles <code>.gz</code>/<code>.bz2</code>/<code>.Z</code>)</td>
+</tr>
+<tr>
+<td><code>cmd_restore.c</code></td>
+<td><code>restore</code> (2.9 dump tape → image)</td>
+</tr>
+<tr>
+<td><code>cmd_dump.c</code></td>
+<td><code>dump</code> (image → 2.9 dump tape; <code>-T</code> for SIMH <code>.tap</code>)</td>
+</tr>
+<tr>
+<td><code>cmd_fsck.c</code></td>
+<td><code>fsck</code> phases 1–3, <code>-p</code> repair, <code>-l</code> list; plus <code>icheck</code>, <code>dcheck</code>, <code>clri</code></td>
+</tr>
+<tr>
+<td><code>cmd_fsdb.c</code></td>
+<td><code>fsdb</code> interactive debugger (<code>-w</code> to edit)</td>
+</tr>
+<tr>
+<td><code>cmd_manifest.c</code></td>
+<td><code>manifest</code> + <code>verify</code> (mtree-style fingerprint/diff)</td>
+</tr>
+<tr>
+<td><code>cmd_scavenge.c</code></td>
+<td><code>scavenge</code> (deleted names + signature carving)</td>
+</tr>
+<tr>
+<td><code>cmd_analysis.c</code></td>
+<td><code>ncheck</code>, <code>quot</code>, <code>du</code>, <code>df</code>, <code>labelit</code></td>
+</tr>
+<tr>
+<td><code>cmd_util.c</code></td>
+<td><code>boot</code> (block-0 bootstrap) + <code>devices</code></td>
+</tr>
+<tr>
+<td><code>cmd_vhd.c</code></td>
+<td><code>vhd</code> fixed-VHD wrap/unwrap/info</td>
+</tr>
+<tr>
+<td><code>cmd_fs.c</code></td>
+<td>the file commands + <code>fs_copy</code>/helpers</td>
+</tr>
+<tr>
+<td><code>cmd_shell.c</code></td>
+<td><code>shell</code> — interactive multi-mount VFS</td>
+</tr>
+<tr>
+<td><code>cmd_mount.c</code></td>
+<td><code>mount</code>/<code>umount</code> FUSE wrapper (only with <code>FUSE=1</code>)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-the-subsystems">4. The subsystems</h2>
+<p>Each of these has its own document.</p>
+<table>
+<thead>
+<tr>
+<th>Subsystem</th>
+<th>Document</th>
+<th>What it owns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>On-disk format</td>
+<td><a href="../on-disk-format/index.html"><code>on-disk-format.md</code></a></td>
+<td>superblock, dinode, dirents, the SysV dialect</td>
+</tr>
+<tr>
+<td>Byte order</td>
+<td><a href="../byte-order/index.html"><code>byte-order.md</code></a></td>
+<td>the three codecs, middle-endian, <code>l3</code></td>
+</tr>
+<tr>
+<td>Allocator</td>
+<td><a href="../allocator/index.html"><code>allocator.md</code></a></td>
+<td>chained free list, rotational interleave</td>
+</tr>
+<tr>
+<td>Mutation engine</td>
+<td><a href="../mutation-engine/index.html"><code>mutation-engine.md</code></a></td>
+<td>the RW handle, block maps, the file ops</td>
+</tr>
+<tr>
+<td>Interactive shell</td>
+<td><a href="../shell/index.html"><code>shell.md</code></a></td>
+<td>the multi-mount VFS, routing, cross-image <code>cp</code></td>
+</tr>
+<tr>
+<td>Checker</td>
+<td><a href="../fsck/index.html"><code>fsck.md</code></a></td>
+<td>the three phases, <code>-p</code> repair</td>
+</tr>
+<tr>
+<td>Containers</td>
+<td><a href="../containers/index.html"><code>containers.md</code></a></td>
+<td>dump tapes, SIMH <code>.tap</code>, fixed VHD</td>
+</tr>
+<tr>
+<td>Partitions</td>
+<td><a href="../partitions/index.html"><code>partitions.md</code></a></td>
+<td>geometry, device tables, base offsets</td>
+</tr>
+<tr>
+<td>Correctness</td>
+<td><a href="../validation/index.html"><code>validation.md</code></a></td>
+<td>the standard and the evidence</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-design-invariants">5. Design invariants</h2>
+<p>These are load-bearing. Breaking one does not produce a compile error; it
+produces an image that looks fine and is wrong.</p>
+<ol>
+<li><strong>Never overlay a host struct on disk bytes.</strong> Every multi-byte field is
+read and written through an <code>s5_codec</code>. This is what makes the tool
+byte-order-portable and 64-bit-clean.</li>
+<li><strong>One mutation path.</strong> New file-manipulation features extend <code>s5fs_rw.c</code>;
+the CLI, shell, and FUSE all call it. Don't fork the logic.</li>
+<li><strong>Consistency after every op.</strong> High-level <code>rw_*</code> operations flush the
+superblock before returning, so the on-disk image is valid after each call.</li>
+<li><strong>Block addresses are 24-bit.</strong> Hence a hard ceiling of 2²⁴ blocks, enforced
+in <code>s5fs_begin</code>. The guard refuses rather than silently truncating.</li>
+<li><strong>Block size ∈ {512, 1024, 2048} only.</strong> 2048 is the s5fs family maximum;
+larger blocks are FFS, a different filesystem. <code>NADDR</code> is <strong>13</strong> for 512 and
+2048, and <strong>7</strong> for 1024 (the UCB_NKB profile).</li>
+<li><strong>Times are preserved, not stamped.</strong> A zero time means &quot;stamp with the
+superblock's time&quot;; any nonzero value is written through verbatim. 1980s
+dates must survive a restore, a <code>tar x</code>, and a <code>mktree</code>.</li>
+<li><strong>Partitions are a base-block offset, full stop.</strong> There is no on-disk
+label. Whole-disk operations on a partition must be <strong>grow-only</strong>.</li>
+<li><strong><code>-pedantic</code> clean, C99, no GCC-isms.</strong> The build stays warning-free under
+<code>-Wall -Wextra -pedantic</code>.</li>
+</ol>
+<hr />
+<h2 id="6-scope-boundaries">6. Scope boundaries</h2>
+<p>Deliberate, and not defects to be fixed:</p>
+<ul>
+<li><strong>s5fs family only</strong> — V7, 2.8, 2.9, 2.10, and other s5fs hosts via the
+codecs. <strong>V6 and 2.11 are out of scope.</strong> FFS/UFS is a different filesystem.</li>
+<li><strong>Max filesystem</strong> — 2²⁴ blocks: 8 GiB @512, 16 GiB @1024, 32 GiB @2048.</li>
+<li><strong>Max file</strong> — 2 GiB (<code>di_size</code> is a signed 32-bit byte count).</li>
+<li><strong>Fixed VHD only.</strong> Dynamic and differencing VHD are out of scope.</li>
+<li><strong>No source→bootable-disk rebuild pipeline.</strong> A previously considered
+&quot;rebuild the whole OS from source&quot; end-goal was explicitly dropped. This
+toolkit is the finished deliverable on its own terms.</li>
+</ul>
+<hr />
+<h2 id="7-testing">7. Testing</h2>
+<p><code>make test</code> runs <code>tests/run.sh</code> — 27 checks, self-contained (it builds all its
+own fixtures and needs no external historical data) and dependency-free (<code>sh</code>
+plus coreutils).</p>
+<p>The character of the suite: <strong>every mutating flow ends by asserting <code>s5fs fsck</code>
+prints <code>clean</code>.</strong> Beyond that it covers both layers and their seam — file
+operations, partitions, VHD, <code>.tap</code> framing, all three byte orders, 2048-byte
+blocks and the SysV superblock, the oversize guard, <code>fsdb</code>, <code>manifest</code>/<code>verify</code>,
+<code>scavenge</code>, the analysis bundle, and the multi-mount shell.</p>
+<p>Two round-trips carry most of the weight, because they are end-to-end and
+compare bytes rather than opinions: <code>tar c | tar x | tar c</code> must produce an
+identical archive, and <code>dump | restore | tar c</code> must match that same archive.</p>
+<p>New behavior gets a check. If it mutates, the check ends <code>fsck clean</code>.</p>
+<hr />
+<h2 id="8-for-a-maintainer">8. For a maintainer</h2>
+<ul>
+<li><strong>The primitive already exists a layer down.</strong> Hand-rolled directory or
+block-map math in a <code>cmd_*.c</code> is the smell that matters most here.</li>
+<li><strong>Bound directory iteration by the returned byte count</strong>, never by slot
+capacity. <code>fsr_readfile</code> clamps to the real size, but a naive loop over all
+<code>NDIRECT</code> slots reads stale buffer bytes and invents ghost entries. This bug
+has appeared twice (<code>cmd_analysis.c</code>, <code>cmd_scavenge.c</code>).</li>
+<li><strong>A zero time means &quot;now&quot;; a nonzero time is verbatim.</strong> Do not reintroduce
+&quot;stamp everything now&quot; — it destroys the 1980s dates that make a restored
+tree faithful.</li>
+<li><strong>Grow-only when <code>base != 0</code>.</strong> Never <code>ftruncate</code> a whole-disk image down to
+one partition's size.</li>
+<li><strong>Orphan directories are not link-count-zero.</strong> A directory always has
+<code>nlink ≥ 1</code> from its own <code>.</code>, so orphans are found by reachability, not by
+link count.</li>
+<li><strong>Don't vendor copyrighted data into this repo.</strong> The validation oracle —
+emulators, native tool binaries, original release trees — lives outside it and
+is deliberately not committable. See <a href="../validation/index.html"><code>validation.md</code></a>.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

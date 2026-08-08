@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Byte order | s5fs</title>
+  <meta name="description" content="s5fs has the same on-disk structure on every machine that ran it. Only the encoding of fields wider than one byte follows the CPU.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">Byte order</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-the-three-regimes">1. The three regimes</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-the-exact-encodings">2. The exact encodings</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#why-the-pdp-11-32-bit-order-looks-scrambled">Why the PDP-11 32-bit order looks scrambled</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#why-the-3-byte-order-is-stranger-still">Why the 3-byte order is stranger still</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-the-codec-interface">3. The codec interface</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-auto-detection">4. Auto-detection</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-adding-a-host">5. Adding a host</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-for-a-maintainer">6. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>Byte order</h1>
+          <p class="docs-article__summary">s5fs has the same on-disk structure on every machine that ran it. Only the encoding of fields wider than one byte follows the CPU.</p>
+          <p class="docs-article__source">Byte order</p>
+        </header>
+        <div class="prose">
+<p>s5fs has the <strong>same on-disk structure on every machine that ran it</strong>. Only the
+encoding of fields wider than one byte follows the CPU. That single observation
+is what lets one writer emit images for three different hardware regimes, and
+it is why byte order is a pluggable codec here rather than a <code>#ifdef</code>.</p>
+<p>Structure lives in <a href="../on-disk-format/index.html"><code>on-disk-format.md</code></a>; this document is
+encoding only. The code is <code>src/s5endian.[ch]</code> — about 120 lines, and nothing
+above it may assume an order.</p>
+<hr />
+<h2 id="1-the-three-regimes">1. The three regimes</h2>
+<table>
+<thead>
+<tr>
+<th>codec</th>
+<th>16-bit</th>
+<th>32-bit</th>
+<th>3-byte</th>
+<th>machines</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>S5_PDP11</code></strong></td>
+<td>LE</td>
+<td><strong>middle-endian</strong></td>
+<td>PDP <code>l3</code></td>
+<td>Research V7, 2.xBSD on the PDP-11</td>
+</tr>
+<tr>
+<td><strong><code>S5_LE</code></strong></td>
+<td>LE</td>
+<td>LE</td>
+<td>LE</td>
+<td>VAX (3BSD/4.0/4.1), and any little-endian SysV host</td>
+</tr>
+<tr>
+<td><strong><code>S5_BE</code></strong></td>
+<td>BE</td>
+<td>BE</td>
+<td>BE</td>
+<td>big-endian SysV hosts (m68k, the Interdata port)</td>
+</tr>
+</tbody>
+</table>
+<p><code>S5_PDP11</code> is deliberately the zero value, so a zero-initialized <code>s5fs_opts</code>
+produces a PDP-11 image — the common case — without anyone having to remember
+to set it.</p>
+<p>Names are parsed leniently, because people describe these machines
+inconsistently:</p>
+<table>
+<thead>
+<tr>
+<th>codec</th>
+<th>accepted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>S5_PDP11</code></td>
+<td><code>pdp11</code>, <code>pdp</code>, <code>pdp-11</code></td>
+</tr>
+<tr>
+<td><code>S5_LE</code></td>
+<td><code>le</code>, <code>little</code>, <code>vax</code>, <code>x86</code>, <code>i386</code></td>
+</tr>
+<tr>
+<td><code>S5_BE</code></td>
+<td><code>be</code>, <code>big</code>, <code>m68k</code>, <code>68k</code>, <code>mc68000</code>, <code>sun</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-the-exact-encodings">2. The exact encodings</h2>
+<p>Take <code>0xAABBCCDD</code> as a 32-bit field, and a 24-bit block address <code>v</code> with
+<code>hi = v&gt;&gt;16</code>, <code>mid = v&gt;&gt;8</code>, <code>lo = v</code>:</p>
+<table>
+<thead>
+<tr>
+<th>codec</th>
+<th>32-bit bytes</th>
+<th>3-byte bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>S5_PDP11</code></td>
+<td><code>BB AA DD CC</code></td>
+<td><code>hi lo mid</code></td>
+</tr>
+<tr>
+<td><code>S5_LE</code></td>
+<td><code>DD CC BB AA</code></td>
+<td><code>lo mid hi</code></td>
+</tr>
+<tr>
+<td><code>S5_BE</code></td>
+<td><code>AA BB CC DD</code></td>
+<td><code>hi mid lo</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-the-pdp-11-32-bit-order-looks-scrambled">Why the PDP-11 32-bit order looks scrambled</h3>
+<p>The PDP-11 has no 32-bit register. A <code>long</code> is <strong>two 16-bit words</strong>, each stored
+little-endian, with the <strong>high word first</strong>. So the machine writes
+<code>BB AA</code> (the high word, LE) then <code>DD CC</code> (the low word, LE). This is
+&quot;middle-endian&quot; or &quot;word-swapped&quot;, and it is neither of the two orders anyone
+reaches for by reflex — which is exactly why it has to be a codec and not an
+assumption.</p>
+<h3 id="why-the-3-byte-order-is-stranger-still">Why the 3-byte order is stranger still</h3>
+<p>Block addresses are packed into three bytes by the <code>l3tol</code>/<code>ltol3</code> routines,
+and the PDP-11 layout — <code>hi lo mid</code> — is not a truncation of <em>any</em> of the 32-bit
+orders. It is its own convention. The encodings here were derived from the two
+shipped <code>l3tol.c</code> implementations (PDP-11 and VAX) plus each CPU's long
+representation; the big-endian variant matches the historical <code>#ifdef interdata</code>
+branch of the same file.</p>
+<p>The practical warning: <strong>you cannot derive the 3-byte encoding from the 32-bit
+one.</strong> Both are tabulated above because both had to be looked up.</p>
+<hr />
+<h2 id="3-the-codec-interface">3. The codec interface</h2>
+<pre><code class="language-c">typedef struct {
+        const char *name;
+        void     (*put16)(uint8_t *, uint16_t);
+        uint16_t (*get16)(const uint8_t *);
+        void     (*put32)(uint8_t *, uint32_t);
+        uint32_t (*get32)(const uint8_t *);
+        void     (*put24)(uint8_t *, uint32_t);   /* 3-byte block address */
+        uint32_t (*get24)(const uint8_t *);
+} s5_codec;
+</code></pre>
+<p>Six functions, no state. Every layer that touches disk bytes holds a
+<code>const s5_codec *bo</code> and calls through it: <code>fs-&gt;bo-&gt;put16(dp + P11_DI_MODE, mode)</code>.</p>
+<p>This is what invariant #1 — <em>never overlay a host struct on disk bytes</em> —
+actually buys. Because no host <code>struct</code> is ever laid over the image, the
+toolkit is simultaneously byte-order-portable, alignment-safe, and 64-bit-clean,
+and none of those three required separate work.</p>
+<hr />
+<h2 id="4-auto-detection">4. Auto-detection</h2>
+<p>Writers are told the byte order (<code>mkfs -a</code>); readers work it out. <code>detect_bo</code>
+tries each codec in turn and accepts the first whose superblock decodes to a
+<em>self-consistent</em> volume:</p>
+<pre><code>  isize &gt;= 2  &amp;&amp;  isize &lt; fsize  &amp;&amp;  fsize &gt; 0  &amp;&amp;  fsize &lt;= (file size / bsize)
+</code></pre>
+<p>The check is strong in practice because the wrong codec scrambles <code>s_fsize</code>
+into something that almost never lands under the actual file size while also
+staying above a plausible <code>s_isize</code>. The file's own length is the anchor — that
+is the piece an attacker of the heuristic (or an unlucky image) would have to
+match by accident.</p>
+<p><code>-A pdp11|le|be</code> forces a codec and skips detection, which is what you want for
+a truncated image, a fragment, or a partition whose length you are still
+working out.</p>
+<p>Note the asymmetry: <strong>the block size is not detected, and cannot be.</strong> There is
+no on-disk block-size marker in the V7-derived superblock — only the optional
+SysV <code>s_type</code> records it. Byte order is guessable because it has redundancy to
+check against; block size has none.</p>
+<hr />
+<h2 id="5-adding-a-host">5. Adding a host</h2>
+<p>A new machine is a new codec, not a new code path:</p>
+<ol>
+<li>Add an enum value in <code>s5endian.h</code> before <code>S5_NENDIAN</code>.</li>
+<li>Add the six functions and the table entry in <code>s5endian.c</code>.</li>
+<li>Add its names to <code>s5_endian_parse</code>.</li>
+<li>Possibly add a <code>device.c</code> entry if it brings new disk geometry.</li>
+</ol>
+<p>Nothing above <code>s5endian.c</code> changes. If a change to support a new host requires
+touching <code>fsread.c</code> or <code>s5fs_core.c</code>, the layering has been violated somewhere
+and that is the bug to fix first.</p>
+<hr />
+<h2 id="6-for-a-maintainer">6. For a maintainer</h2>
+<ul>
+<li><strong><code>S5_PDP11</code> must stay 0.</strong> A zero-initialized options struct meaning
+&quot;PDP-11&quot; is relied on.</li>
+<li><strong>The 3-byte order is independent of the 32-bit order.</strong> Don't derive one
+from the other; use the table in §2.</li>
+<li><strong>Nothing above the codec may assume an order</strong> — no <code>htons</code>, no casting a
+buffer to a <code>uint32_t *</code>, no memcpy of a multi-byte field.</li>
+<li><strong>Detection needs the file length.</strong> Keep the <code>fsize &lt;= fileblocks</code> term; it
+is what makes the heuristic reliable.</li>
+<li><strong>Block size is not detectable.</strong> Don't add a heuristic for it — say <code>-B</code>.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

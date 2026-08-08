@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Disks and partitions | s5fs</title>
+  <meta name="description" content="How a filesystem is placed inside a larger file, how disk geometry is selected, and why partitioning here looks nothing like a modern partition table.">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">Disks and partitions</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-a-partition-is-a-base-offset-that-is-the-entire-model">1. A partition is a base offset. That is the entire model.</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-selecting-one">2. Selecting one</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-the-grow-only-rule">3. The grow-only rule</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-the-built-in-table">4. The built-in table</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#geometry-is-hardware-drivers-are-software">Geometry is hardware; drivers are software</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-user-defined-disks">5. User-defined disks</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-device-nodes">6. Device nodes</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#7-for-a-maintainer">7. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>Disks and partitions</h1>
+          <p class="docs-article__summary">How a filesystem is placed inside a larger file, how disk geometry is selected, and why partitioning here looks nothing like a modern partition table.</p>
+          <p class="docs-article__source">Disks and partitions</p>
+        </header>
+        <div class="prose">
+<p>How a filesystem is placed inside a larger file, how disk geometry is selected,
+and why partitioning here looks nothing like a modern partition table.</p>
+<p>Code: <code>src/device.[ch]</code>; the base offset threads through <code>fsread</code>, <code>s5fs_core</code>,
+and <code>s5fs_rw</code>.</p>
+<hr />
+<h2 id="1-a-partition-is-a-base-offset-that-is-the-entire-model">1. A partition is a base offset. That is the entire model.</h2>
+<p>There is <strong>no on-disk label</strong> on these disks. Nothing on the platter says where
+partition <code>a</code> ends or that partition <code>c</code> exists.</p>
+<p>Instead, the kernel driver had the layout <strong>compiled into it</strong> — a <code>*_sizes[]</code>
+table in <code>sys/GENERIC/ioconf.c</code> — and <code>minor(dev) &amp; 7</code> indexed it. The disk had
+to conform to the kernel, not the other way round. Change kernels, and the same
+platter is partitioned differently, with no warning and no way to detect the
+mismatch.</p>
+<p><code>device.c</code> mirrors those tables:</p>
+<pre><code class="language-c">typedef struct {
+        char     letter;   /* 'a'..'h'                        */
+        uint32_t start;    /* first block, in 512-byte blocks */
+        uint32_t len;      /* length in 512-byte blocks       */
+} disk_part;
+</code></pre>
+<p><strong>Overlap is normal and correct.</strong> Partitions <code>a</code>, <code>b</code>, and <code>c</code> typically tile
+the disk while <code>g</code> or <code>h</code> alias the whole thing. A modern check that rejects
+overlapping partitions would reject every real 2.9BSD disk.</p>
+<p>Everything below the CLI reduces the selection to one number: <code>base</code>, a byte
+offset. <code>fsread</code>, <code>s5fs_core</code>, and <code>s5fs_rw</code> all take it, add it to every block
+offset, and are otherwise unaware that a partition is involved.</p>
+<hr />
+<h2 id="2-selecting-one">2. Selecting one</h2>
+<p>Three ways, in precedence order:</p>
+<pre><code class="language-sh">s5fs mkfs -o 20000:40000 disk.dsk    # explicit START[:LEN], 512-byte blocks
+s5fs mkfs -d rp06 -P a  disk.dsk     # partition 'a' of an RP06
+s5fs mkfs           bare.dsk         # base 0, the whole file
+</code></pre>
+<p><code>-o</code> wins if given, then <code>-d</code>/<code>-P</code>, otherwise the whole image. <code>-o</code> exists for
+disks whose table you do not have, images you are reverse-engineering, and
+fragments.</p>
+<p>Two isolated filesystems in one whole-disk image:</p>
+<pre><code class="language-sh">s5fs mkfs -d rp06 -P a disk.dsk
+s5fs mkfs -d rp06 -P c disk.dsk
+s5fs fsck -d rp06 -P a disk.dsk      # each checks independently
+s5fs fsck -d rp06 -P c disk.dsk
+</code></pre>
+<p>The test suite asserts exactly this: a file written into <code>a</code> is absent from <code>c</code>,
+the whole-disk file is the full RP06 size, and both partitions <code>fsck</code> clean.</p>
+<hr />
+<h2 id="3-the-grow-only-rule">3. The grow-only rule</h2>
+<p><strong>A whole-disk operation on a partition must never shrink the file.</strong></p>
+<p><code>s5fs_begin</code> sizes the image so that unallocated blocks read as zero. For a
+bare image (<code>base == 0</code>) it <code>ftruncate</code>s to exactly the filesystem size. For a
+partition (<code>base != 0</code>) that would be catastrophic — the file is a <em>whole disk</em>
+the caller already sized, and truncating it to one partition's length destroys
+every partition after this one:</p>
+<pre><code class="language-c">if (fs-&gt;base == 0) {
+        ftruncate(fd, (off_t)nblocks * fs-&gt;bsize);          /* exact */
+} else {
+        off_t need = fs-&gt;base + (off_t)nblocks * fs-&gt;bsize;
+        if (fstat(fd, &amp;st) == 0 &amp;&amp; st.st_size &lt; need)
+                ftruncate(fd, need);                        /* grow only */
+}
+</code></pre>
+<p>This was a real bug — <code>mkfs -P</code> truncating a whole-disk image down — and it was
+found with <code>strace</code>, by noticing a double <code>ftruncate</code>. It is invariant #7 for a
+reason.</p>
+<hr />
+<h2 id="4-the-built-in-table">4. The built-in table</h2>
+<p>Capacities are in 512-byte blocks, cross-checked between the 2.9BSD drivers and
+SIMH's <code>pdp11_*.c</code> geometry.</p>
+<table>
+<thead>
+<tr>
+<th>device</th>
+<th>blocks</th>
+<th>notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rk05</code></td>
+<td>4 872</td>
+<td>RK11 cartridge</td>
+</tr>
+<tr>
+<td><code>rl01</code> / <code>rl02</code></td>
+<td>10 240 / 20 480</td>
+<td>RL11 cartridges</td>
+</tr>
+<tr>
+<td><code>rk06</code> / <code>rk07</code></td>
+<td>27 126 / 53 790</td>
+<td>RK611</td>
+</tr>
+<tr>
+<td><code>rp03</code></td>
+<td>83 180</td>
+<td>RP11</td>
+</tr>
+<tr>
+<td><code>rm03</code></td>
+<td>131 680</td>
+<td>Massbus</td>
+</tr>
+<tr>
+<td><code>rp04</code> / <code>rp05</code></td>
+<td>171 798</td>
+<td>Massbus</td>
+</tr>
+<tr>
+<td><code>rm80</code></td>
+<td>242 606</td>
+<td>Massbus</td>
+</tr>
+<tr>
+<td><code>rp06</code></td>
+<td>340 670</td>
+<td>Massbus</td>
+</tr>
+<tr>
+<td><code>rm05</code></td>
+<td>500 384</td>
+<td>Massbus</td>
+</tr>
+<tr>
+<td><code>rp07</code></td>
+<td>1 008 000</td>
+<td>Massbus</td>
+</tr>
+<tr>
+<td><code>rx50</code> … <code>ra92</code></td>
+<td>800 … 2 940 951</td>
+<td>MSCP family (2.10-era)</td>
+</tr>
+</tbody>
+</table>
+<p><code>s5fs devices</code> prints the effective table; <code>s5fs devices &lt;name&gt;</code> prints one
+disk's partitions.</p>
+<h3 id="geometry-is-hardware-drivers-are-software">Geometry is hardware; drivers are software</h3>
+<p>A device selection only fixes the <strong>total size</strong>, and geometry is a property of
+the drive, identical across releases. So the per-release <code>since</code>/<code>until</code> tags in
+the table are <strong>advisory only</strong>: they exist to print a gentle heads-up if you
+volunteer a <code>--target</code> release and pick a disk whose driver was not usually in
+that release's kernels.</p>
+<p>It is never an error, never blocks, and with no <code>--target</code> it never fires at
+all. PDP-11 driver provenance is genuinely messy — backports, site ports,
+one-off Emulex controllers — so this is a hint, not a rule. Keep it that way; a
+hard check here would reject legitimate historical configurations.</p>
+<hr />
+<h2 id="5-user-defined-disks">5. User-defined disks</h2>
+<p>The built-in table can be extended or overridden by an INI file, found via
+<code>$S5FS_DEVICES</code> or <code>~/.config/s5fs/devices</code>. <code>examples/devices.ini</code> is the
+template:</p>
+<pre><code class="language-ini">[eagle]
+blocks     = 1002000
+desc       = Fujitsu M2351 Eagle (SMD, ~490 MB)
+partitions = a:0:20000 b:20000:20000 c:40000:962000 h:0:1002000
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>blocks</code></td>
+<td><strong>required</strong> — capacity in 512-byte blocks</td>
+</tr>
+<tr>
+<td><code>desc</code></td>
+<td>shown by <code>s5fs devices</code></td>
+</tr>
+<tr>
+<td><code>since</code> / <code>until</code></td>
+<td>advisory range (<code>v7</code>|<code>2.8</code>|<code>2.9</code>|<code>2.10</code>)</td>
+</tr>
+<tr>
+<td><code>partitions</code></td>
+<td><code>letter:start:length …</code> in 512-byte blocks</td>
+</tr>
+</tbody>
+</table>
+<p>Unknown keys are ignored on purpose, so adding a geometry field later cannot
+break someone's existing file. A device with no <code>blocks</code> is skipped with a
+warning rather than aborting the run.</p>
+<p><strong>Match your kernel's table.</strong> Since the disk carries no label, an INI entry
+that disagrees with the kernel you intend to boot produces a filesystem the
+kernel will read at the wrong offset.</p>
+<hr />
+<h2 id="6-device-nodes">6. Device nodes</h2>
+<p>Related, and a different flavor of the same &quot;must match the kernel&quot; problem.
+<code>mktree -D</code> takes a spec file describing <code>/dev</code>:</p>
+<pre><code># name  type  major  minor  [octal-mode]
+console c 0 0 0600
+null    c 2 2 0666
+rl0     b 5 0 0600
+</code></pre>
+<p>A device node has no data blocks; its major and minor are packed into
+<code>di_addr[0]</code> as <code>(major &lt;&lt; 8) | minor</code>.</p>
+<p><strong>The major numbers must match the target kernel's <code>cdevsw[]</code>/<code>bdevsw[]</code>.</strong>
+Those are configuration-specific — read the kernel's <code>c.c</code>. The values in
+<code>examples/dev.spec</code> are illustrative of a small 2.9BSD <code>/dev</code>, not
+authoritative.</p>
+<hr />
+<h2 id="7-for-a-maintainer">7. For a maintainer</h2>
+<ul>
+<li><strong><code>base</code> is a byte offset and nothing more.</strong> Don't grow it into a partition
+abstraction; the layers below it should stay unaware.</li>
+<li><strong>Grow-only when <code>base != 0</code>.</strong> Never <code>ftruncate</code> a whole-disk image down
+(§3).</li>
+<li><strong>Overlapping partitions are legal.</strong> Don't validate them away.</li>
+<li><strong>The driver advisory is advisory.</strong> It must never become an error or a
+blocker.</li>
+<li><strong>Unknown INI keys are ignored deliberately</strong> — that is the forward
+compatibility story.</li>
+<li><strong>Capacities are in 512-byte blocks everywhere in this file</strong>, regardless of
+the filesystem block size. Mixing the two units is the easy mistake.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

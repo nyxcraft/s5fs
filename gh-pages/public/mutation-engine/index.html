@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The mutation engine | s5fs</title>
+  <meta name="description" content="Everything that changes an image goes through src/s5fs_rw.[ch].">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="site-doc">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header site-header--compact">
+      <a class="brand" href="../index.html">
+        <img class="brand__icon" src="../assets/logo-s5fs.svg" alt="" aria-hidden="true">
+        <span class="brand__name">s5fs</span><span class="brand__badge">beta</span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="../overview/index.html">Overview</a>
+        <a href="../design/index.html">Design</a>
+        <a href="../user-guide/index.html">User guide</a>
+        <a href="https://github.com/nyxcraft/s5fs">GitHub</a>
+      </nav>
+    </header>
+
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="../index.html">Home</a>
+      <span class="breadcrumbs__sep" aria-hidden="true">›</span>
+      <span aria-current="page">The mutation engine</span>
+    </nav>
+
+    <main id="main-content" class="docs-layout" tabindex="-1">
+      <aside class="docs-sidebar">
+        <p class="docs-sidebar__eyebrow">On this page</p>
+        <nav class="section-nav" aria-label="On this page">
+<ul class="section-nav__list">
+<li><a class="section-nav__link section-nav__link--l2" href="#1-the-rw-handle-two-fds-one-image">1. The RW handle: two fds, one image</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#2-consistency-after-every-operation">2. Consistency after every operation</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#3-the-block-map">3. The block map</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#4-the-operations">4. The operations</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-deletion-precisely">5. Deletion, precisely</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-extending-it">6. Extending it</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#7-for-a-maintainer">7. For a maintainer</a></li>
+</ul>
+        </nav>
+      </aside>
+
+      <article class="docs-article">
+        <header class="docs-article__header">
+          <p class="eyebrow">Documentation</p>
+          <h1>The mutation engine</h1>
+          <p class="docs-article__summary">Everything that changes an image goes through src/s5fs_rw.[ch].</p>
+          <p class="docs-article__source">The mutation engine</p>
+        </header>
+        <div class="prose">
+<p>Everything that changes an image goes through <code>src/s5fs_rw.[ch]</code>. This is
+invariant #2 — <em>one mutation path</em> — made concrete: the batch file commands, the
+interactive shell, and the FUSE mount are three front-ends over one
+implementation of mkdir, unlink, rename, truncate, and the rest.</p>
+<p>The directory-slot, inode-allocation, and block-map logic here was originally
+proven inside the FUSE read-write layer, then factored out precisely so the
+non-FUSE commands could run the same proven code rather than a second copy.</p>
+<hr />
+<h2 id="1-the-rw-handle-two-fds-one-image">1. The RW handle: two fds, one image</h2>
+<pre><code class="language-c">typedef struct {
+        FSR  r;         /* read side  (always open)        */
+        S5FS w;         /* write side (valid if writable)  */
+        int  writable;
+} RW;
+</code></pre>
+<p>An <code>RW</code> opens the same file <strong>twice</strong> — once read-only through the reader, once
+<code>O_RDWR</code> through the writer:</p>
+<pre><code class="language-c">int rw_open(RW *h, const char *path, uint32_t bsize, int forced_bo,
+            int writable, int64_t base)
+{
+        if (fsr_open(&amp;h-&gt;r, path, bsize, forced_bo, base) &lt; 0)
+                return -1;
+        if (writable) {
+                int wfd = open(path, O_RDWR);
+                if (wfd &lt; 0 || s5fs_mount(&amp;h-&gt;w, wfd, h-&gt;r.bsize, h-&gt;r.bo, base) &lt; 0)
+                        ... unwind ...
+                h-&gt;writable = 1;
+        }
+        return 0;
+}
+</code></pre>
+<p>Two things make this work rather than being a hazard:</p>
+<ul>
+<li><strong>The two fds are page-cache coherent.</strong> On any Unix, two descriptors on the
+same file share the page cache, so the read side observes the write side's
+writes immediately. No flush-and-reopen dance is needed, and none exists.</li>
+<li><strong>The writer inherits the reader's decoded parameters</strong> — <code>h-&gt;r.bsize</code> and
+<code>h-&gt;r.bo</code>. Byte order is auto-detected exactly once, by the reader, and the
+writer is then told. There is no second detection to disagree with the first.</li>
+</ul>
+<p>The alternative — one fd, with the reader and writer sharing it — would have
+meant one of the two layers giving up its own file position and buffering
+model. Two coherent fds is the cheaper correctness.</p>
+<p>Read-only is a first-class mode: <code>writable = 0</code> leaves <code>w</code> untouched, and every
+mutating entry point checks the flag. That is what the shell's <code>mount -r</code>
+rides on.</p>
+<hr />
+<h2 id="2-consistency-after-every-operation">2. Consistency after every operation</h2>
+<p>Invariant #3. Every high-level <code>rw_*</code> operation calls <code>rw_sync</code> before
+returning:</p>
+<pre><code class="language-c">void rw_sync(RW *h) { if (h-&gt;writable) s5fs_finish(&amp;h-&gt;w); }
+</code></pre>
+<p><code>s5fs_finish</code> serializes the in-core superblock — free list, counts, timestamp
+— back to block 1. So after <code>rw_mkdir</code> returns, the image on disk is a valid
+filesystem, not a half-updated one waiting for a close.</p>
+<p>This costs one block write per operation and buys the property the test suite
+leans on: <strong><code>fsck</code> can be run after any single operation and must say <code>clean</code>.</strong>
+Preserve it.</p>
+<p>The one deliberate exception is documented at the call site: a bulk loop that
+writes many blocks syncs <strong>once at the end</strong> rather than per block. Single-shot
+callers sync themselves.</p>
+<hr />
+<h2 id="3-the-block-map">3. The block map</h2>
+<p><code>rw_bmap</code> maps a logical block number to a physical one, optionally allocating:</p>
+<pre><code class="language-c">uint32_t rw_bmap(RW *h, uint8_t *ds, uint32_t lbn, int alloc, int *dirty);
+</code></pre>
+<p><code>ds</code> is the caller's copy of the raw 64-byte dinode; <code>dirty</code> is set when the map
+changed and the inode needs writing back. Passing the dinode in — rather than
+re-reading it per call — is what lets a write loop touch the inode once.</p>
+<p>The map is the format's: <code>laddr</code> direct slots, then single, double, and triple
+indirect, with <code>ind_map</code> recursing a level at a time and allocating indirect
+blocks on demand when <code>alloc</code> is set. <code>per_at(levels)</code> gives the data blocks
+covered per entry at each level (<code>nindir^(levels-1)</code>).</p>
+<p>Inode location is the same arithmetic as everywhere else, exposed for the FUSE
+random-write path:</p>
+<pre><code class="language-c">void rw_ino_loc(RW *h, uint32_t ino, uint32_t *blk, uint32_t *off)
+{
+        *blk = (ino + 2 * h-&gt;w.inopb - 1) / h-&gt;w.inopb;
+        *off = ((ino + 2 * h-&gt;w.inopb - 1) % h-&gt;w.inopb) * P11_DINODESZ;
+}
+</code></pre>
+<hr />
+<h2 id="4-the-operations">4. The operations</h2>
+<p>All paths are <strong>absolute within the image</strong> (<code>/bin/sh</code>). All return <code>0</code> or a
+negative errno, so a FUSE front-end can return the value directly and a CLI
+front-end can <code>strerror(-rc)</code> it.</p>
+<table>
+<thead>
+<tr>
+<th>operation</th>
+<th>notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rw_mkdir(path, perm)</code></td>
+<td>creates <code>.</code> and <code>..</code>, bumps the parent's link count</td>
+</tr>
+<tr>
+<td><code>rw_rmdir(path)</code></td>
+<td>refuses a non-empty directory</td>
+</tr>
+<tr>
+<td><code>rw_unlink(path)</code></td>
+<td>zeroes the directory slot's inode field; frees blocks at link 0</td>
+</tr>
+<tr>
+<td><code>rw_rename(from, to)</code></td>
+<td>within one image</td>
+</tr>
+<tr>
+<td><code>rw_creat(path, perm, &amp;ino)</code></td>
+<td>returns the new inode number</td>
+</tr>
+<tr>
+<td><code>rw_chmod</code> / <code>rw_chown</code> / <code>rw_utimes</code></td>
+<td>metadata only</td>
+</tr>
+<tr>
+<td><code>rw_pwrite(ino, buf, size, off)</code></td>
+<td>allocating random write</td>
+</tr>
+<tr>
+<td><code>rw_truncate(ino, len)</code></td>
+<td>grows or shrinks; frees the tail</td>
+</tr>
+<tr>
+<td><code>rw_put_fd(path, srcfd, perm, mtime)</code></td>
+<td>stream a host fd into the image</td>
+</tr>
+<tr>
+<td><code>rw_copy(src, dst)</code></td>
+<td>within one image</td>
+</tr>
+<tr>
+<td><code>rw_copy_between(sh, src, dh, dst)</code></td>
+<td><strong>across two images</strong></td>
+</tr>
+</tbody>
+</table>
+<p><code>rw_copy_between</code> is the primitive that makes the shell's cross-image <code>cp</code> work
+(see <a href="../shell/index.html"><code>shell.md</code></a>). It takes two <code>RW</code> handles and streams through,
+rather than requiring a host temporary file.</p>
+<p><code>rw_utimes</code> and the <code>mtime</code> argument to <code>rw_put_fd</code> exist so front-ends can
+honor invariant #6 — preserve times rather than stamping them. A caller that
+knows the original time must pass it.</p>
+<hr />
+<h2 id="5-deletion-precisely">5. Deletion, precisely</h2>
+<p>Worth spelling out because two subsystems depend on the details:</p>
+<ol>
+<li>The directory entry's <strong>2-byte inode field is zeroed</strong>. The 14 name bytes
+are left alone — which is what <a href="../allocator/index.html"><code>scavenge</code></a> reads.</li>
+<li>The inode's link count drops. If it reaches zero, the block map is walked
+and every block is returned via <code>s5fs_bfree</code>, and the inode is cleared.</li>
+<li>Because <code>s5fs_bfree</code> spills the superblock cache into a freed block every
+50th call, deletion <strong>destroys the contents of roughly one freed block in
+fifty</strong>. See <a href="../allocator/index.html"><code>allocator.md</code></a> §2.</li>
+</ol>
+<p>Step 1 is why deleted names survive. Step 3 is why deleted <em>files</em> do not.</p>
+<hr />
+<h2 id="6-extending-it">6. Extending it</h2>
+<p>New file operation:</p>
+<ol>
+<li>Implement <code>rw_&lt;op&gt;</code> in <code>s5fs_rw.c</code>, ending in <code>rw_sync</code>.</li>
+<li>Declare it in <code>s5fs_rw.h</code>.</li>
+<li>Wire it into <code>cmd_fs.c</code> (batch), <code>cmd_shell.c</code> (interactive), and
+<code>cmd_mount.c</code> (FUSE) as appropriate.</li>
+<li>Add a check to <code>tests/run.sh</code> that ends <code>fsck clean</code>.</li>
+</ol>
+<p>If step 1 finds itself re-deriving directory-entry offsets or indirect-block
+arithmetic, the primitive already exists — <code>rw_bmap</code>, <code>rw_ino_loc</code>,
+<code>s5fs_alloc</code>, <code>s5fs_setblocks</code>.</p>
+<hr />
+<h2 id="7-for-a-maintainer">7. For a maintainer</h2>
+<ul>
+<li><strong>Two fds, page-cache coherent.</strong> Don't &quot;optimize&quot; this into one fd, and
+don't add a flush-and-reopen; the coherence is what the design rests on.</li>
+<li><strong>Byte order is detected once, by the reader.</strong> The writer is told. Never
+detect twice.</li>
+<li><strong>Every high-level op ends in <code>rw_sync</code>.</strong> A bulk loop may sync once at the
+end, but a single-shot caller must not skip it.</li>
+<li><strong>Return <code>-errno</code>, not <code>-1</code>.</strong> The FUSE layer passes the value straight
+through.</li>
+<li><strong>Paths are absolute within the image.</strong> Host paths never reach this layer —
+the <code>@</code> escape is resolved by the front-end.</li>
+<li><strong>Preserve times.</strong> If a caller knows the original mtime, it must pass it;
+defaulting to &quot;now&quot; is the regression that keeps trying to come back.</li>
+</ul>
+
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>© 2026 Nicholas J. Kisseberth · <a href="../index.html">s5fs</a> · <a href="https://github.com/nyxcraft/s5fs">License</a></p>
+      <p class="site-footer__attr">Software Architecture, Design &amp; Engineering by Nicholas J. Kisseberth.</p>
+    </footer>
+  </div>
+
+  <script>
+  // Section viewer: split the page into one panel per H2 and show one at a time, driven by the
+  // left-rail "On this page" links (and any in-prose # link). Degrades to the full page when
+  // JavaScript is off -- the panels are only hidden once .js-sections is set here.
+  (function () {
+    var prose = document.querySelector('.prose');
+    if (!prose) return;
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.section-nav a[href^="#"]'));
+
+    var kids = Array.prototype.slice.call(prose.childNodes);
+    var groups = [], preface = [], cur = null;
+    kids.forEach(function (n) {
+      if (n.nodeType === 1 && n.tagName === 'H2') { cur = { id: n.id, nodes: [n] }; groups.push(cur); }
+      else if (cur) { cur.nodes.push(n); }
+      else { preface.push(n); }
+    });
+    if (!groups.length) return;                 // no H2s -> leave the page as one scroll
+    groups[0].nodes = preface.concat(groups[0].nodes);
+
+    prose.innerHTML = '';
+    prose.classList.add('js-sections');
+    var anchorToSection = {};
+    var sections = groups.map(function (g) {
+      var s = document.createElement('section');
+      s.className = 'doc-section';
+      g.nodes.forEach(function (n) { s.appendChild(n); });
+      prose.appendChild(s);
+      Array.prototype.forEach.call(s.querySelectorAll('[id]'), function (el) { anchorToSection[el.id] = s; });
+      if (g.id) anchorToSection[g.id] = s;
+      return s;
+    });
+
+    function activate(anchor, scroll) {
+      var target = anchorToSection[anchor] || sections[0];
+      sections.forEach(function (s) { s.classList.toggle('is-active', s === target); });
+      navLinks.forEach(function (a) {
+        var id = decodeURIComponent(a.getAttribute('href').slice(1));
+        a.classList.toggle('is-active', anchorToSection[id] === target);
+      });
+      if (scroll) {
+        var el = (anchor && document.getElementById(anchor)) || target;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+    function fromHash(scroll) { activate(decodeURIComponent((location.hash || '').slice(1)), scroll); }
+
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!a) return;
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (anchorToSection[id]) activate(id, true);
+    });
+    window.addEventListener('hashchange', function () { fromHash(true); });
+    fromHash(false);
+  })();
+  </script>
+</body>
+</html>

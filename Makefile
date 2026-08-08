@@ -38,7 +38,22 @@ $(BIN):
 test: $(BIN)/s5fs
 	@sh tests/run.sh
 
+# The suite again under AddressSanitizer + UBSan.  Some checks -- notably the
+# crafted dump tape -- exercise memory safety, and an out-of-bounds READ does
+# not fault on a normal build, so it is only detectable here.
+#
+# abort_on_error is the point: by default ASan prints and exits 1, which a test
+# checking "did it crash?" reads as success.  Aborting turns a sanitizer finding
+# into a signal, so the existing crash checks catch it.
+SANFLAGS := -std=c99 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+test-san: $(OBJSRC) $(HDRS) | $(BIN)
+	$(CC) $(SANFLAGS) $(CPPFLAGS) -o $(BIN)/s5fs-san $(OBJSRC) $(FUSELIBS)
+	@S5=$(BIN)/s5fs-san \
+	 ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
+	 UBSAN_OPTIONS=halt_on_error=1:abort_on_error=1 \
+	 sh tests/run.sh
+
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all clean test
+.PHONY: all clean test test-san

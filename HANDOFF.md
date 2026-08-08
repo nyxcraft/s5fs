@@ -320,6 +320,10 @@ original C — keep it that way; don't vendor copyrighted data into it.
   Add a table, fence it.
 - **Tests are not optional.** New behavior → new check in `tests/run.sh`, and it
   must end `fsck clean` if it mutates.
+- **Run `make test-san` too** when touching a parser. Anything that reads a tape,
+  an archive or an image header is handling untrusted input, and an
+  out-of-bounds *read* is invisible to a normal build — `make test` passes with
+  the bug present.
 
 ---
 

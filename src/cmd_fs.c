@@ -188,21 +188,58 @@ fs_copy(RW *h, const char *src, int src_host, const char *dst, int dst_host)
 	}
 }
 
-void
+/* strtol, but the whole field must be a number (and non-empty) */
+static int
+all_num(const char *s, int base, long *out)
+{
+	char *end;
+	long v;
+
+	if (!*s)
+		return -1;
+	errno = 0;
+	v = strtol(s, &end, base);
+	if (*end != '\0' || errno == ERANGE || v < 0)
+		return -1;
+	*out = v;
+	return 0;
+}
+
+int
 fs_parse_owner(const char *spec, int *uid, int *gid)
 {
 	char buf[64], *colon;
+	long v;
+
 	*uid = -1;
 	*gid = -1;
 	snprintf(buf, sizeof buf, "%s", spec);
 	colon = strchr(buf, ':');
 	if (colon) {
 		*colon = '\0';
-		if (colon[1])
-			*gid = (int)strtol(colon + 1, NULL, 10);
+		if (colon[1]) {
+			if (all_num(colon + 1, 10, &v) < 0)
+				return -1;
+			*gid = (int)v;
+		}
 	}
-	if (buf[0])
-		*uid = (int)strtol(buf, NULL, 10);
+	if (buf[0]) {
+		if (all_num(buf, 10, &v) < 0)
+			return -1;
+		*uid = (int)v;
+	}
+	return 0;
+}
+
+int
+fs_parse_mode(const char *spec, unsigned *perm)
+{
+	long v;
+
+	if (all_num(spec, 8, &v) < 0 || v > 07777)
+		return -1;
+	*perm = (unsigned)v;
+	return 0;
 }
 
 void
@@ -866,7 +903,10 @@ cmd_chmod(int argc, char **argv)
 		rw_close(&h);
 		return 2;
 	}
-	perm = (unsigned)strtoul(argv[first], NULL, 8);
+	if (fs_parse_mode(argv[first], &perm) < 0) {
+		fprintf(stderr, "chmod: %s: not an octal mode\n", argv[first]);
+		return 2;
+	}
 	for (i = first + 1; i < argc; i++) {
 		int r = rw_chmod(&h, argv[i], perm);
 		if (r < 0) {
@@ -895,7 +935,10 @@ cmd_chown(int argc, char **argv)
 		rw_close(&h);
 		return 2;
 	}
-	fs_parse_owner(argv[first], &uid, &gid);
+	if (fs_parse_owner(argv[first], &uid, &gid) < 0) {
+		fprintf(stderr, "chown: %s: expected uid[:gid] as numbers\n", argv[first]);
+		return 2;
+	}
 	for (i = first + 1; i < argc; i++) {
 		int r = rw_chown(&h, argv[i], uid, gid);
 		if (r < 0) {
@@ -920,7 +963,17 @@ cmd_chgrp(int argc, char **argv)
 		rw_close(&h);
 		return 2;
 	}
-	gid = (int)strtol(argv[first], NULL, 10);
+	{
+		long g;
+		char *e;
+		errno = 0;
+		g = strtol(argv[first], &e, 10);
+		if (!argv[first][0] || *e || errno == ERANGE || g < 0) {
+			fprintf(stderr, "chgrp: %s: not a numeric group id\n", argv[first]);
+			return 2;
+		}
+		gid = (int)g;
+	}
 	for (i = first + 1; i < argc; i++) {
 		int r = rw_chown(&h, argv[i], -1, gid);
 		if (r < 0) {

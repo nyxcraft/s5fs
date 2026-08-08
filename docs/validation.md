@@ -140,8 +140,16 @@ a fix should be synced back to if one is made here.
 On any host, with no historical data:
 
 ```sh
-make && make test          # 27/27; the whole level-3 suite
+make && make test          # the whole level-3 suite
+make test-san              # the same suite under AddressSanitizer + UBSan
 ```
+
+`test-san` is not redundant. Several checks feed the tools deliberately hostile
+input — a crafted dump tape, a looping free list, a directory cycle — and an
+**out-of-bounds read does not fault on a normal build**. The crafted-tape check
+passes a plain build even with the overflow present; only the sanitizer turns it
+into a failure. `abort_on_error` is set so a sanitizer finding becomes a signal
+rather than a quiet exit 1 that a crash check reads as success.
 
 With the oracle available, the two checks worth re-running by hand are the ones
 the suite cannot do:

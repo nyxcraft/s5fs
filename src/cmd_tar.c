@@ -124,7 +124,15 @@ open_archive(const char *path, char *tmp, size_t tmpsz)
 		close(fd);
 		return -1;
 	}
-	lseek(fd, 0, SEEK_SET);
+	/* The parser seeks around the archive, so a pipe or fifo cannot work.
+	 * Say so here rather than failing later as "read error at 0". */
+	if (lseek(fd, 0, SEEK_SET) < 0) {
+		fprintf(stderr, "s5fs tar: %s: not seekable (pipes are not supported; "
+				"redirect from a file)\n",
+			path);
+		close(fd);
+		return -1;
+	}
 
 	if (m[0] == 0x1f && m[1] == 0x8b)
 		prog = "gzip"; /* .gz  */
@@ -160,6 +168,8 @@ open_archive(const char *path, char *tmp, size_t tmpsz)
 		dup2(tfd, 1);
 		close(fd);
 		close(tfd);
+		/* PATH-resolved on purpose: gzip/bzip2 are expected to be the
+		 * caller's, as with any tool that shells out to a decompressor. */
 		execlp(prog, prog, "-dc", (char *)NULL);
 		_exit(127);
 	}

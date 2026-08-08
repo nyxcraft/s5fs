@@ -404,6 +404,10 @@ documentation. The data tables — <code>subcmds[]</code> in <code>s5fs.c</code>
 Add a table, fence it.</li>
 <li><strong>Tests are not optional.</strong> New behavior → new check in <code>tests/run.sh</code>, and it
 must end <code>fsck clean</code> if it mutates.</li>
+<li><strong>Run <code>make test-san</code> too</strong> when touching a parser. Anything that reads a tape,
+an archive or an image header is handling untrusted input, and an
+out-of-bounds <em>read</em> is invisible to a normal build — <code>make test</code> passes with
+the bug present.</li>
 </ul>
 <hr />
 <h2 id="12-suggested-first-moves-for-the-incoming-engineer">12. Suggested first moves for the incoming engineer</h2>

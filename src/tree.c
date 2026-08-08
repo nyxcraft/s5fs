@@ -77,6 +77,10 @@ walk(tnode *root, const char *path, int create)
 	char *tok, *save;
 	tnode *cur = root;
 
+	/* Truncating here would silently file the entry under a DIFFERENT path
+	 * rather than the one the archive named; refuse instead. */
+	if (strlen(path) >= sizeof buf)
+		return NULL;
 	strncpy(buf, path, sizeof buf - 1);
 	buf[sizeof buf - 1] = '\0';
 	for (tok = strtok_r(buf, "/", &save); tok; tok = strtok_r(NULL, "/", &save)) {

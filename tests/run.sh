@@ -333,6 +333,54 @@ if [ -n "$flb" ] && [ "$flb" -gt 0 ]; then
 	else no "looping free list (hung=$flhang diagnosed=$flsaw)"; fi
 else no "looping free list (could not build the fixture)"; fi
 
+# 19. chmod/chown/chgrp took their arguments through bare strtol, so anything
+#     non-numeric silently became 0: `chmod rwx` stripped every permission bit
+#     and `chown root` set uid 0, both reporting success.  They must refuse.
+"$S5" mkfs -d rl02 "$T/vd.dsk" >/dev/null 2>&1
+"$S5" put "$T/vd.dsk" "$T/src" /f >/dev/null 2>&1
+"$S5" chmod "$T/vd.dsk" 644 /f >/dev/null 2>&1
+"$S5" chmod "$T/vd.dsk" rwx /f >/dev/null 2>&1;      vbad1=$?
+"$S5" chown "$T/vd.dsk" root /f >/dev/null 2>&1;     vbad2=$?
+"$S5" chgrp "$T/vd.dsk" staff /f >/dev/null 2>&1;    vbad3=$?
+vmode=$("$S5" ls -l "$T/vd.dsk" /f 2>/dev/null | awk '{print $1}')
+"$S5" chmod "$T/vd.dsk" 700 /f >/dev/null 2>&1;      vok1=$?
+"$S5" chown "$T/vd.dsk" 55:66 /f >/dev/null 2>&1;    vok2=$?
+vuid=$("$S5" ls -l "$T/vd.dsk" /f 2>/dev/null | awk '{print $3}')
+if [ "$vbad1" -ne 0 ] && [ "$vbad2" -ne 0 ] && [ "$vbad3" -ne 0 ] &&
+   [ "$vmode" = "-rw-r--r--" ] && [ "$vok1" -eq 0 ] && [ "$vok2" -eq 0 ] &&
+   [ "$vuid" = 55 ] && fsck_clean "$T/vd.dsk"; then
+	ok "chmod/chown/chgrp reject non-numeric arguments"
+else no "chmod/chown/chgrp reject non-numeric (rc=$vbad1/$vbad2/$vbad3 mode=$vmode uid=$vuid)"; fi
+
+# 20. a crafted dump tape must not read past the record buffer.  c_count is
+#     taken straight off the tape and used to index the c_addr flags INSIDE the
+#     record; with c_count=65535 and an inflated di_size (so the b<nblk guard
+#     does not stop it first) restore read ~64 KB past a 2048-byte stack array.
+#     An over-read does not fault on a normal build, so this check only has
+#     teeth under `make test-san` -- here it just proves restore still copes.
+"$S5" mkfs -B 512 -b 4000 "$T/tp.dsk" >/dev/null 2>&1
+"$S5" put -B 512 "$T/tp.dsk" "$T/src" /f >/dev/null 2>&1
+"$S5" dump -B 512 "$T/tp.dsk" "$T/tp.dump" >/dev/null 2>&1
+tpoff=""; tpi=0; tpn=$(( $(wc -c < "$T/tp.dump") / 512 ))
+while [ "$tpi" -lt "$tpn" ]; do
+	o=$((tpi * 512))
+	ty=$(od -An -tu2 -j $o          -N2 "$T/tp.dump" | tr -d ' ')
+	mg=$(od -An -tu2 -j $((o + 18)) -N2 "$T/tp.dump" | tr -d ' ')
+	md=$(od -An -tu2 -j $((o + 22)) -N2 "$T/tp.dump" | tr -d ' ')
+	if [ "$ty" = 2 ] && [ "$mg" = 60011 ] && [ $((md / 4096)) -eq 8 ]; then tpoff=$o; break; fi
+	tpi=$((tpi + 1))
+done
+if [ -n "$tpoff" ]; then
+	cp "$T/tp.dump" "$T/tp.bad"
+	printf '\377\377' | dd of="$T/tp.bad" bs=1 seek=$((tpoff + 86)) conv=notrunc 2>/dev/null
+	printf '\000\001\000\000' | dd of="$T/tp.bad" bs=1 seek=$((tpoff + 30)) conv=notrunc 2>/dev/null
+	tmo 30 "$S5" restore -B 512 -b 4000 "$T/tp.bad" "$T/tp.out" >/dev/null 2>&1
+	tprc=$?
+	if [ "$tprc" -le 128 ] && [ "$tprc" -ne 124 ]; then
+		ok "crafted dump tape does not overrun the record buffer"
+	else no "crafted dump tape (exit $tprc)"; fi
+else no "crafted dump tape (could not find a TS_INODE record)"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

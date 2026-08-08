@@ -151,6 +151,15 @@ read_blocks(S5FS *fs, DR *dr, uint8_t *hdr, int32_t *da, uint32_t nblk)
 	memcpy(ab, hdr, dr->rec);
 	for (;;) {
 		uint16_t count = dr->bo->get16(ab + C_COUNT), i;
+		/* c_count is read straight off the tape and then used to index the
+		 * c_addr flags INSIDE this record, so it cannot be trusted: a
+		 * crafted tape (count 65535 plus an inflated di_size, so the
+		 * b < nblk guard does not stop it first) reads far past `ab`.
+		 * Clamp to the flags a record can actually hold. */
+		uint16_t maxa = (uint16_t)(dr->rec - C_ADDR);
+
+		if (count > maxa)
+			count = maxa;
 		for (i = 0; i < count && b < nblk; i++, b++) {
 			if (ab[C_ADDR + i]) {
 				if (!rec_read(dr, rec))

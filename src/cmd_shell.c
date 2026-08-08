@@ -797,7 +797,11 @@ cmd_shell(int argc, char **argv)
 			if (n < 3)
 				printf("usage: chmod mode path...\n");
 			else {
-				unsigned pm = (unsigned)strtoul(tok[1], NULL, 8);
+				unsigned pm;
+				if (fs_parse_mode(tok[1], &pm) < 0) {
+					printf("chmod: %s: not an octal mode\n", tok[1]);
+					continue;
+				}
 				int i;
 				for (i = 2; i < n; i++) {
 					char sub[2048];
@@ -816,10 +820,21 @@ cmd_shell(int argc, char **argv)
 			if (n < 3)
 				printf("usage: %s %s path...\n", tok[0], grp ? "gid" : "uid[:gid]");
 			else {
-				if (grp)
-					gid = (int)strtol(tok[1], NULL, 10);
-				else
-					fs_parse_owner(tok[1], &uid, &gid);
+				if (grp) {
+					long g;
+					char *e;
+					errno = 0;
+					g = strtol(tok[1], &e, 10);
+					if (!tok[1][0] || *e || errno == ERANGE || g < 0) {
+						printf("chgrp: %s: not a numeric group id\n", tok[1]);
+						continue;
+					}
+					gid = (int)g;
+				}
+				else if (fs_parse_owner(tok[1], &uid, &gid) < 0) {
+					printf("chown: %s: expected uid[:gid] as numbers\n", tok[1]);
+					continue;
+				}
 				for (i = 2; i < n; i++) {
 					char sub[2048];
 					struct mount *m = rpath(tok[i], sub, sizeof sub);

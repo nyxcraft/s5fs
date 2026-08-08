@@ -151,8 +151,20 @@ partitions = a:0:20000 b:20000:20000 c:40000:962000 h:0:1002000
 | `partitions` | `letter:start:length …` in 512-byte blocks |
 
 Unknown keys are ignored on purpose, so adding a geometry field later cannot
-break someone's existing file. A device with no `blocks` is skipped with a
-warning rather than aborting the run.
+break someone's existing file. Everything else is checked and reported rather
+than quietly accepted:
+
+| input | result |
+|---|---|
+| `[]` (empty name) | ignored, with a message |
+| `blocks` not a number, or > 2³²−1 | ignored, with a message |
+| partition letter outside `a`..`h` | ignored (a partition is `minor(dev)&7`) |
+| partition `start + length` out of range | ignored |
+| `[section` with no `]` | **the section is dropped** |
+
+That last one matters more than it looks. The malformed header used to be
+skipped while the keys under it still applied — to the *previous* device. A
+single missing bracket silently rewrote a different disk's geometry.
 
 **Match your kernel's table.** Since the disk carries no label, an INI entry
 that disagrees with the kernel you intend to boot produces a filesystem the

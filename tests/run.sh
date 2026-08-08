@@ -381,6 +381,31 @@ if [ -n "$tpoff" ]; then
 	else no "crafted dump tape (exit $tprc)"; fi
 else no "crafted dump tape (could not find a TS_INODE record)"; fi
 
+# 21. the device spec file is user input and was parsed loosely: an empty
+#     [] name, a non-numeric blocks value, partition letters outside a..h and
+#     out-of-range start/length were all accepted silently.  Worst, an
+#     unterminated "[section" was skipped and its keys then applied to the
+#     PREVIOUS device -- so a typo silently rewrote a different disk.
+cat > "$T/bad.ini" <<'INI'
+[]
+blocks = 100
+[good]
+blocks = 4000
+partitions = a:0:2000 z:0:10 b:2000:2000
+[victim]
+blocks = 777
+[unterminated
+blocks = 5
+INI
+S5FS_DEVICES="$T/bad.ini" "$S5" devices >"$T/ini.out" 2>"$T/ini.err"
+inivic=$(awk '$1 == "victim" {print $2}' "$T/ini.out")     # must keep its own 777
+inibad=$(grep -c "not a..h\|empty device name\|missing ']'" "$T/ini.err")
+iniprt=$("$S5" devices good 2>/dev/null | grep -cE '^   [ab] ')
+S5FS_DEVICES="$T/bad.ini" "$S5" mkfs -d good "$T/ini.dsk" >/dev/null 2>&1; inimk=$?
+if [ "$inivic" = 777 ] && [ "$inibad" -ge 3 ] && [ "$inimk" -eq 0 ] && fsck_clean "$T/ini.dsk"; then
+	ok "device spec rejects malformed entries (and keys do not leak between sections)"
+else no "device spec validation (victim=$inivic diags=$inibad mkfs=$inimk)"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

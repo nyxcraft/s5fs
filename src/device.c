@@ -28,6 +28,7 @@
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
+#include <errno.h>
 
 /* Standard partition tables, straight from sys/GENERIC/ioconf.c, with the
  * cylinder offsets pre-multiplied by that driver's blocks-per-cylinder so the
@@ -198,12 +199,27 @@ load_user(const char *path)
 			continue; /* blank / full-line comment */
 		if (*p == '[') {  /* [devname] */
 			char *end = strchr(p, ']');
-			if (!end)
-				continue;
-			*end = '\0';
 			commit(&cur, &have);
 			memset(&cur, 0, sizeof cur);
+			if (!end) {
+				/* Without this the malformed header is skipped and the
+				 * keys under it silently modify the PREVIOUS device. */
+				fprintf(stderr, "s5fs: %s: '%s': missing ']' -- section ignored\n",
+					path, p);
+				have = 0;
+				continue;
+			}
+			*end = '\0';
+			if (!*trim(p + 1)) {
+				fprintf(stderr, "s5fs: %s: empty device name -- ignored\n", path);
+				have = 0;
+				continue;
+			}
 			cur.name = strdup(trim(p + 1));
+			if (!cur.name) {
+				perror("s5fs: strdup");
+				exit(1);
+			}
 			cur.since = REL_V7; /* default: never warns */
 			cur.until = REL_210;
 			have = 1;
@@ -218,10 +234,24 @@ load_user(const char *path)
 			key = trim(p);
 			val = trim(eq + 1);
 			if (!strcasecmp(key, "blocks")) {
-				cur.blocks = (uint32_t)strtoul(val, NULL, 0);
+				char *bend;
+				unsigned long bv;
+				errno = 0;
+				bv = strtoul(val, &bend, 0);
+				if (!*val || *bend || errno == ERANGE || bv > 0xffffffffUL) {
+					fprintf(stderr, "s5fs: %s: [%s] blocks '%s': "
+							"not a block count -- ignored\n",
+						path, cur.name, val);
+					continue;
+				}
+				cur.blocks = (uint32_t)bv;
 			}
 			else if (!strcasecmp(key, "desc")) {
 				cur.desc = strdup(val);
+				if (!cur.desc) {
+					perror("s5fs: strdup");
+					exit(1);
+				}
 			}
 			else if (!strcasecmp(key, "since") || !strcasecmp(key, "until")) {
 				for (sp = val; *sp && !isspace((unsigned char)*sp); sp++)
@@ -245,6 +275,20 @@ load_user(const char *path)
 					unsigned long st, ln;
 					if (sscanf(tok, "%c:%lu:%lu", &L, &st, &ln) != 3)
 						continue;
+					/* a partition is minor(dev)&7, so only a..h exist */
+					if (L < 'a' || L > 'h') {
+						fprintf(stderr, "s5fs: %s: [%s] partition '%c': "
+								"not a..h -- ignored\n",
+							path, cur.name, L);
+						continue;
+					}
+					if (st > 0xffffffffUL || ln > 0xffffffffUL ||
+					    st + ln > 0xffffffffUL) {
+						fprintf(stderr, "s5fs: %s: [%s] partition '%c': "
+								"start+length out of range -- ignored\n",
+							path, cur.name, L);
+						continue;
+					}
 					pv = realloc(pv, (size_t)(pn + 1) * sizeof *pv);
 					if (!pv) {
 						perror("s5fs: realloc");

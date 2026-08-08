@@ -1,5 +1,8 @@
 # s5fs -- 2.9BSD-family disk-image tools
 
+[![CI](https://github.com/nyxcraft/s5fs/actions/workflows/ci.yml/badge.svg)](https://github.com/nyxcraft/s5fs/actions/workflows/ci.yml)
+[![Docs](https://github.com/nyxcraft/s5fs/actions/workflows/pages.yml/badge.svg)](https://github.com/nyxcraft/s5fs/actions/workflows/pages.yml)
+
 A single host multi-tool for building and inspecting the traditional PDP-11
 Unix filesystem (retroactively **s5fs**) as SIMH `.dsk` images.  It is
 release-agnostic: one filesystem writer covers **V7, 2.8, 2.9, and 2.10** (see

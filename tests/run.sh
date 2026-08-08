@@ -238,6 +238,33 @@ else no "directory cycle (could not build the fixture)"; fi
 "$S5" tar x -B 2048 -d rp06 "$T/b2.tar" "$T/b2.dsk" >/dev/null 2>&1
 if fsck_clean -B 2048 "$T/b2.dsk"; then ok "tar x -B 2048"; else no "tar x -B 2048"; fi
 
+# 16. a file large enough to reach the DOUBLE-indirect tail must round-trip.
+#     s5fs_setblocks lays single/double/triple out sequentially, but every
+#     reader ended the double range at nindir^2 instead of nindir + nindir^2,
+#     so the last nindir blocks of it were looked up in the TRIPLE indirect.
+#     At 512-byte blocks that is byte 8393728 onward -- a file written by
+#     mktree/tar x/restore read back corrupt from there, and fsck stayed clean.
+#     Content must vary with position or a misrouted block reads the same.
+mkdir -p "$T/bigtr" && seq 1 1500000 > "$T/bigtr/big"      # ~10.4 MB > the 8.45 MB boundary
+"$S5" mktree -B 512 -b 40000 "$T/bigtr" "$T/bg.dsk" >/dev/null 2>&1
+"$S5" get -B 512 "$T/bg.dsk" /big "$T/bg.out" >/dev/null 2>&1
+"$S5" cat -B 512 "$T/bg.dsk" /big > "$T/bg.cat" 2>/dev/null
+if cmp -s "$T/bigtr/big" "$T/bg.out" && cmp -s "$T/bigtr/big" "$T/bg.cat" &&
+   fsck_clean -B 512 "$T/bg.dsk"; then
+	ok "double-indirect tail round-trips (get + cat)"
+else no "double-indirect tail round-trips"; fi
+
+# 16b. and through the archive/tape front-ends, which use the same map
+"$S5" tar c -B 512 "$T/bg.dsk" "$T/bg.tar" >/dev/null 2>&1
+"$S5" tar x -B 512 -b 40000 "$T/bg.tar" "$T/bg2.dsk" >/dev/null 2>&1
+"$S5" get -B 512 "$T/bg2.dsk" /big "$T/bg2.out" >/dev/null 2>&1
+"$S5" dump -B 512 "$T/bg.dsk" "$T/bg.dmp" >/dev/null 2>&1
+"$S5" restore -B 512 -b 40000 "$T/bg.dmp" "$T/bg3.dsk" >/dev/null 2>&1
+"$S5" get -B 512 "$T/bg3.dsk" /big "$T/bg3.out" >/dev/null 2>&1
+if cmp -s "$T/bigtr/big" "$T/bg2.out" && cmp -s "$T/bigtr/big" "$T/bg3.out"; then
+	ok "large file survives tar and dump round-trips"
+else no "large file survives tar and dump round-trips"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

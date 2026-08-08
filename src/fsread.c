@@ -124,50 +124,64 @@ fsr_iget(FSR *r, uint32_t ino, fsr_inode *out)
 	return 0;
 }
 
+int
+fsr_lbn_route(uint32_t laddr, uint32_t nindir, uint32_t lbn,
+	      uint32_t *slot, uint32_t *idx)
+{
+	uint32_t per = nindir;
+
+	if (lbn < laddr) {
+		*slot = lbn;
+		*idx = 0;
+		return 0;
+	}
+	lbn -= laddr;
+	if (lbn < per) {
+		*slot = laddr;
+		*idx = lbn;
+		return 1;
+	}
+	lbn -= per;
+	if (lbn < per * per) {
+		*slot = laddr + 1;
+		*idx = lbn;
+		return 2;
+	}
+	lbn -= per * per;
+	if (lbn < per * per * per) {
+		*slot = laddr + 2;
+		*idx = lbn;
+		return 3;
+	}
+	return -1;
+}
+
+uint32_t
+fsr_ind_index(uint32_t nindir, uint32_t idx, int level)
+{
+	uint32_t d = 1;
+	int k;
+
+	for (k = 1; k < level; k++)
+		d *= nindir;
+	return (idx / d) % nindir;
+}
+
 /* logical block -> physical (0 = hole) */
 static uint32_t
 bmap(FSR *r, const int32_t *addr, uint32_t lbn)
 {
 	uint8_t buf[P11_MAXBSIZE];
-	uint32_t phys, per = r->nindir;
+	uint32_t phys, slot, idx;
+	int lvl = fsr_lbn_route(r->laddr, r->nindir, lbn, &slot, &idx), L;
 
-	if (lbn < r->laddr)
-		return (uint32_t)addr[lbn];
-	lbn -= r->laddr;
-	if (lbn < per) {
-		phys = (uint32_t)addr[r->laddr];
-		if (phys && rdblk(r, phys, buf) == 0)
-			phys = r->bo->get32(buf + 4 * lbn);
-		else
-			phys = 0;
-	}
-	else if (lbn < per * per) {
-		lbn -= per;
-		phys = (uint32_t)addr[r->laddr + 1];
-		if (phys && rdblk(r, phys, buf) == 0)
-			phys = r->bo->get32(buf + 4 * (lbn / per));
-		else
-			phys = 0;
-		if (phys && rdblk(r, phys, buf) == 0)
-			phys = r->bo->get32(buf + 4 * (lbn % per));
-		else
-			phys = 0;
-	}
-	else {
-		lbn -= per * per;
-		phys = (uint32_t)addr[r->laddr + 2];
-		if (phys && rdblk(r, phys, buf) == 0)
-			phys = r->bo->get32(buf + 4 * (lbn / (per * per)));
-		else
-			phys = 0;
-		if (phys && rdblk(r, phys, buf) == 0)
-			phys = r->bo->get32(buf + 4 * ((lbn / per) % per));
-		else
-			phys = 0;
-		if (phys && rdblk(r, phys, buf) == 0)
-			phys = r->bo->get32(buf + 4 * (lbn % per));
-		else
-			phys = 0;
+	if (lvl < 0)
+		return 0;
+	phys = (uint32_t)addr[slot];
+	for (L = lvl; L >= 1 && phys; L--) {
+		if (rdblk(r, phys, buf) < 0)
+			return 0;
+		phys = r->bo->get32(buf + 4 * fsr_ind_index(r->nindir, idx, L));
 	}
 	return phys;
 }

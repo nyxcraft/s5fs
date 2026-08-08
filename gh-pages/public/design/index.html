@@ -353,6 +353,9 @@ identical archive, and <code>dump | restore | tar c</code> must match that same 
 <ul>
 <li><strong>The primitive already exists a layer down.</strong> Hand-rolled directory or
 block-map math in a <code>cmd_*.c</code> is the smell that matters most here.</li>
+<li><strong>The block-map ladder lives once</strong>, in <code>fsr_lbn_route()</code>. It was open-coded
+in four readers and three had the double-indirect range wrong, silently
+corrupting every file past ~8 MB. Call the shared one.</li>
 <li><strong>Bound directory iteration by the returned byte count</strong>, never by slot
 capacity. <code>fsr_readfile</code> clamps to the real size, but a naive loop over all
 <code>NDIRECT</code> slots reads stale buffer bytes and invents ghost entries. This bug

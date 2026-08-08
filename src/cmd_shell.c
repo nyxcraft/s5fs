@@ -182,6 +182,10 @@ do_mount(int argc, char **argv)
 	}
 	mtab[nmnt].at = strdup(at);
 	mtab[nmnt].img = strdup(hostfile);
+	if (!mtab[nmnt].at || !mtab[nmnt].img) {
+		perror("s5fs shell");
+		exit(1);
+	}
 	mtab[nmnt].h = h;
 	mtab[nmnt].ro = !h.writable;
 	nmnt++;
@@ -706,6 +710,10 @@ cmd_shell(int argc, char **argv)
 		}
 		mtab[0].at = strdup("/");
 		mtab[0].img = strdup(argv[optind]);
+		if (!mtab[0].at || !mtab[0].img) {
+			perror("s5fs shell");
+			exit(1);
+		}
 		mtab[0].h = h;
 		mtab[0].ro = !h.writable;
 		nmnt = 1;

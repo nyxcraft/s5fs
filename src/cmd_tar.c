@@ -26,6 +26,7 @@
 #include "device.h"
 #include "cmds.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,16 +61,25 @@ must_num(const char *s, const char *what)
 	return v;
 }
 
-/* octal field -> long (space/NUL terminated, leading blanks allowed) */
+/* Octal field -> long (space/NUL terminated, leading blanks allowed).
+ *
+ * The value comes straight off the archive, so a crafted 12-byte size field can
+ * otherwise overflow `long` and drive the caller's file offset negative.  Cap
+ * instead: the caller range-checks the result, and a saturated value fails that
+ * check rather than wrapping into a plausible one. */
 static long
 octal(const uint8_t *p, int len)
 {
 	long v = 0;
 	int i = 0;
+
 	while (i < len && (p[i] == ' ' || p[i] == '\0'))
 		i++;
-	for (; i < len && p[i] >= '0' && p[i] <= '7'; i++)
+	for (; i < len && p[i] >= '0' && p[i] <= '7'; i++) {
+		if (v > (LONG_MAX - (p[i] - '0')) / 8)
+			return LONG_MAX; /* saturate; caller rejects it */
 		v = v * 8 + (p[i] - '0');
+	}
 	return v;
 }
 
@@ -214,6 +224,10 @@ parse_tar(int fd, tnode *root)
 		size = octal(h + 124, 12);
 		off = pos + 512;
 		type = h[156];
+		if (size < 0 || size > INT32_MAX) { /* crafted or corrupt length */
+			fprintf(stderr, "s5fs tar: implausible entry size at %ld\n", pos);
+			return -1;
+		}
 
 		if (type == 'L') { /* GNU long name in the data */
 			int m = size < (long)sizeof longname - 1 ? (int)size : (int)sizeof longname - 1;
@@ -520,6 +534,10 @@ thl_add(uint32_t ino, const char *path)
 	}
 	g_thl[g_nthl].ino = ino;
 	g_thl[g_nthl].path = strdup(path);
+	if (!g_thl[g_nthl].path) {
+		perror("s5fs tar");
+		exit(1);
+	}
 	g_nthl++;
 }
 
@@ -553,6 +571,10 @@ ustar_hdr(uint8_t *h, const char *name, unsigned mode, int uid, int gid,
 			memcpy(h, s + 1, strlen(s + 1));
 		}
 		else {
+			/* No split point inside ustar's name/prefix limits.  Say
+			 * so: silently writing the first 100 bytes puts a WRONG
+			 * path in the archive, which extracts without complaint. */
+			fprintf(stderr, "s5fs tar: %s: path too long for ustar (truncated)\n", name);
 			memcpy(h, name, 100);
 		}
 	}
@@ -632,7 +654,9 @@ tar_emit(FSR *r, int out, uint32_t ino, const char *path, const fsr_inode *in)
 				if (want > 512)
 					want = 512;
 				memset(blk, 0, 512);
-				fsr_readfile(r, in, blk, want, off);
+				if (fsr_readfile(r, in, blk, want, off) != want)
+					fprintf(stderr, "s5fs tar: %s: short read at %ld (zero-filled)\n",
+						path, off);
 				wr(out, blk, 512);
 				off += want;
 			}

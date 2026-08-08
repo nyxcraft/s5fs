@@ -123,41 +123,31 @@ ind_map(RW *h, uint32_t iblk, uint32_t idx, int levels, int alloc)
 	}
 }
 
+/* Thin wrapper so this file reads the same as before; the ladder itself lives
+ * in fsread.c (fsr_lbn_route) because four readers need the identical one. */
+static int
+lbn_route(const RW *h, uint32_t lbn, uint32_t *slot, uint32_t *idx)
+{
+	return fsr_lbn_route(h->w.laddr, h->w.nindir, lbn, slot, idx);
+}
+
 uint32_t
 rw_bmap(RW *h, uint8_t *ds, uint32_t lbn, int alloc, int *dirty)
 {
-	uint32_t per = h->w.nindir, iblk, slot, idx;
-	int lvl;
+	uint32_t iblk, slot, idx;
+	int lvl = lbn_route(h, lbn, &slot, &idx);
 
-	if (lbn < h->w.laddr) {
-		uint32_t phys = h->w.bo->get24(ds + P11_DI_ADDR + 3 * lbn);
+	if (lvl < 0)
+		return 0;
+	if (lvl == 0) {
+		uint32_t phys = h->w.bo->get24(ds + P11_DI_ADDR + 3 * slot);
 		if (!phys && alloc) {
 			phys = (uint32_t)s5fs_alloc(&h->w);
-			h->w.bo->put24(ds + P11_DI_ADDR + 3 * lbn, phys);
+			h->w.bo->put24(ds + P11_DI_ADDR + 3 * slot, phys);
 			*dirty = 1;
 		}
 		return phys;
 	}
-	lbn -= h->w.laddr;
-	if (lbn < per) {
-		lvl = 1;
-		slot = h->w.laddr;
-		idx = lbn;
-	}
-	else if (lbn < per * per) {
-		lbn -= per;
-		lvl = 2;
-		slot = h->w.laddr + 1;
-		idx = lbn;
-	}
-	else if (lbn < per * per * per) {
-		lbn -= per * per;
-		lvl = 3;
-		slot = h->w.laddr + 2;
-		idx = lbn;
-	}
-	else
-		return 0;
 
 	iblk = h->w.bo->get24(ds + P11_DI_ADDR + 3 * slot);
 	if (!iblk) {
@@ -176,38 +166,20 @@ rw_bmap(RW *h, uint8_t *ds, uint32_t lbn, int alloc, int *dirty)
 static void
 bfree_at(RW *h, uint8_t *ds, uint32_t lbn)
 {
-	uint32_t per = h->w.nindir, slot, idx, iblk, b;
+	uint32_t slot, idx, iblk, b;
 	uint8_t ib[P11_MAXBSIZE];
-	int lvl, L;
+	int lvl = lbn_route(h, lbn, &slot, &idx), L;
 
-	if (lbn < h->w.laddr) {
-		b = h->w.bo->get24(ds + P11_DI_ADDR + 3 * lbn);
+	if (lvl < 0)
+		return;
+	if (lvl == 0) {
+		b = h->w.bo->get24(ds + P11_DI_ADDR + 3 * slot);
 		if (b) {
 			s5fs_bfree(&h->w, (int32_t)b);
-			h->w.bo->put24(ds + P11_DI_ADDR + 3 * lbn, 0);
+			h->w.bo->put24(ds + P11_DI_ADDR + 3 * slot, 0);
 		}
 		return;
 	}
-	lbn -= h->w.laddr;
-	if (lbn < per) {
-		lvl = 1;
-		slot = h->w.laddr;
-		idx = lbn;
-	}
-	else if (lbn < per * per) {
-		lbn -= per;
-		lvl = 2;
-		slot = h->w.laddr + 1;
-		idx = lbn;
-	}
-	else if (lbn < per * per * per) {
-		lbn -= per * per;
-		lvl = 3;
-		slot = h->w.laddr + 2;
-		idx = lbn;
-	}
-	else
-		return;
 	iblk = h->w.bo->get24(ds + P11_DI_ADDR + 3 * slot);
 	for (L = lvl; L > 1 && iblk; L--) {
 		uint32_t d = per_at(h, L), e;

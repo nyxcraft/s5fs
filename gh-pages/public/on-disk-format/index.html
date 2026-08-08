@@ -42,6 +42,7 @@
 <li><a class="section-nav__link section-nav__link--l3" href="#mode-bits">Mode bits</a></li>
 <li><a class="section-nav__link section-nav__link--l3" href="#times">Times</a></li>
 <li><a class="section-nav__link section-nav__link--l2" href="#4-the-block-map">4. The block map</a></li>
+<li><a class="section-nav__link section-nav__link--l3" href="#one-ladder-one-definition">One ladder, one definition</a></li>
 <li><a class="section-nav__link section-nav__link--l2" href="#5-directories">5. Directories</a></li>
 <li><a class="section-nav__link section-nav__link--l3" href="#the-stale-buffer-trap">The stale-buffer trap</a></li>
 <li><a class="section-nav__link section-nav__link--l2" href="#6-free-blocks">6. Free blocks</a></li>
@@ -505,6 +506,21 @@ direct + single/double/triple, allocating indirect blocks as it goes, so real
 files of any size can be stored.</li>
 </ul>
 <p>Do not merge them. The first one's fidelity is the thing being protected.</p>
+<h3 id="one-ladder-one-definition">One ladder, one definition</h3>
+<p>The levels are <strong>sequential</strong>: single covers <code>nindir</code> blocks starting where the
+direct slots end, double covers <code>nindir²</code> starting where single ends, triple
+<code>nindir³</code> after that. <code>s5fs_setblocks</code> lays them down exactly that way.</p>
+<p>Every <em>reader</em> used to open-code the same ladder — <code>fsread.c</code>, <code>cmd_fsck.c</code>,
+<code>cmd_fsdb.c</code>, <code>s5fs_rw.c</code> — and three of them ended the double range at
+<code>nindir²</code> instead of <code>nindir + nindir²</code>. The last <code>nindir</code> blocks of the double
+region were therefore looked up in the <strong>triple</strong> indirect, so any file past
+<strong>~8.4 MB at 512-byte blocks</strong> (or ~67 MB at 1024) read back corrupt from that
+offset on. <code>fsck</code> stayed clean throughout, because the block <em>accounting</em> was
+consistent — only the mapping was wrong.</p>
+<p>The routing now lives once, in <code>fsr_lbn_route()</code> (declared in <code>fsread.h</code>), with
+<code>fsr_ind_index()</code> for the descent. All four readers call it. <strong>Do not
+re-open-code this ladder</strong> — that is the whole reason the bug existed in three
+places at once.</p>
 <hr />
 <h2 id="5-directories">5. Directories</h2>
 <p>A directory is an ordinary file whose contents are fixed 16-byte records:</p>

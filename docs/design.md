@@ -204,6 +204,9 @@ New behavior gets a check. If it mutates, the check ends `fsck clean`.
 
 - **The primitive already exists a layer down.** Hand-rolled directory or
   block-map math in a `cmd_*.c` is the smell that matters most here.
+- **The block-map ladder lives once**, in `fsr_lbn_route()`. It was open-coded
+  in four readers and three had the double-indirect range wrong, silently
+  corrupting every file past ~8 MB. Call the shared one.
 - **Bound directory iteration by the returned byte count**, never by slot
   capacity. `fsr_readfile` clamps to the real size, but a naive loop over all
   `NDIRECT` slots reads stale buffer bytes and invents ghost entries. This bug

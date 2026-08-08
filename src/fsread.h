@@ -51,6 +51,28 @@ long fsr_readfile(FSR *r, const fsr_inode *in, void *buf, long size, long off);
 /* Read a raw filesystem block by number into buf (bsize bytes). 0 ok, -1. */
 int fsr_bread(FSR *r, uint32_t bno, uint8_t *buf);
 
+/* Route a logical block number to the di_addr slot covering it, and the index
+ * within that slot's indirect tree.
+ *
+ * Single indirect covers `nindir` blocks, double `nindir^2`, triple `nindir^3`,
+ * each starting where the previous ended -- which is exactly what
+ * s5fs_setblocks lays down.  This ladder used to be open-coded in four readers
+ * and three of them ended the double-indirect range at nindir^2 instead of
+ * nindir + nindir^2, so the last `nindir` blocks of the double region were
+ * looked up in the TRIPLE indirect: every file past ~8 MB (512-byte blocks) or
+ * ~67 MB (1024) read back corrupt from that offset on, and fsck stayed clean
+ * because the block accounting was consistent -- only the mapping was wrong.
+ * One definition now.  Do not re-open-code it.
+ *
+ * Returns 0 for a direct slot (*idx unused), 1/2/3 for single/double/triple, or
+ * -1 when lbn is past the triple-indirect reach. */
+int fsr_lbn_route(uint32_t laddr, uint32_t nindir, uint32_t lbn,
+		  uint32_t *slot, uint32_t *idx);
+
+/* Index into the level-`level` indirect block when descending toward `idx`
+ * (level 3 -> 2 -> 1).  Pairs with fsr_lbn_route. */
+uint32_t fsr_ind_index(uint32_t nindir, uint32_t idx, int level);
+
 /* A visited set for recursive directory walks.
  *
  * A directory cycle is unreachable through this tool's own operations but is

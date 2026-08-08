@@ -20,6 +20,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "pdp11fs.h"
+#include "fsread.h"
 #include "s5endian.h"
 #include "device.h"
 #include "cmds.h"
@@ -195,50 +196,21 @@ static uint32_t
 bmap(CK *c, const int32_t *addr, uint32_t lbn)
 {
 	uint8_t *buf;
-	uint32_t phys, per = c->nindir;
+	uint32_t phys, slot, idx;
+	int lvl = fsr_lbn_route(c->laddr, c->nindir, lbn, &slot, &idx), L;
 
-	if (lbn < c->laddr)
-		return (uint32_t)addr[lbn];
-	lbn -= c->laddr;
+	if (lvl < 0)
+		return 0;
+	phys = (uint32_t)addr[slot];
+	if (lvl == 0)
+		return phys;
 
 	buf = malloc(c->bsize);
 	if (!buf)
 		die("out of memory");
-
-	if (lbn < per) { /* single indirect */
-		phys = (uint32_t)addr[c->laddr];
-		if (phys) {
-			rdblk(c, phys, buf);
-			phys = c->bo->get32(buf + 4 * lbn);
-		}
-	}
-	else if (lbn < per * per) { /* double indirect */
-		lbn -= per;
-		phys = (uint32_t)addr[c->laddr + 1];
-		if (phys) {
-			rdblk(c, phys, buf);
-			phys = c->bo->get32(buf + 4 * (lbn / per));
-		}
-		if (phys) {
-			rdblk(c, phys, buf);
-			phys = c->bo->get32(buf + 4 * (lbn % per));
-		}
-	}
-	else { /* triple indirect */
-		lbn -= per * per;
-		phys = (uint32_t)addr[c->laddr + 2];
-		if (phys) {
-			rdblk(c, phys, buf);
-			phys = c->bo->get32(buf + 4 * (lbn / (per * per)));
-		}
-		if (phys) {
-			rdblk(c, phys, buf);
-			phys = c->bo->get32(buf + 4 * ((lbn / per) % per));
-		}
-		if (phys) {
-			rdblk(c, phys, buf);
-			phys = c->bo->get32(buf + 4 * (lbn % per));
-		}
+	for (L = lvl; L >= 1 && phys; L--) {
+		rdblk(c, phys, buf);
+		phys = c->bo->get32(buf + 4 * fsr_ind_index(c->nindir, idx, L));
 	}
 	free(buf);
 	return phys;

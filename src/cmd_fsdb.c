@@ -54,49 +54,21 @@ typestr(uint16_t mode)
 	}
 }
 
-/* read-only logical->physical map (mirrors fsread's bmap; no allocation) */
+/* read-only logical->physical map; the ladder is fsread's (fsr_lbn_route) */
 static uint32_t
 fdb_bmap(const int32_t *addr, uint32_t lbn)
 {
 	uint8_t buf[P11_MAXBSIZE];
-	uint32_t per = H.r.nindir, phys;
-	if (lbn < H.r.laddr)
-		return (uint32_t)addr[lbn];
-	lbn -= H.r.laddr;
-	if (lbn < per) {
-		phys = (uint32_t)addr[H.r.laddr];
-		if (phys && fsr_bread(&H.r, phys, buf) == 0)
-			phys = H.r.bo->get32(buf + 4 * lbn);
-		else
-			phys = 0;
-	}
-	else if (lbn < per * per) {
-		lbn -= per;
-		phys = (uint32_t)addr[H.r.laddr + 1];
-		if (phys && fsr_bread(&H.r, phys, buf) == 0)
-			phys = H.r.bo->get32(buf + 4 * (lbn / per));
-		else
-			phys = 0;
-		if (phys && fsr_bread(&H.r, phys, buf) == 0)
-			phys = H.r.bo->get32(buf + 4 * (lbn % per));
-		else
-			phys = 0;
-	}
-	else {
-		lbn -= per * per;
-		phys = (uint32_t)addr[H.r.laddr + 2];
-		if (phys && fsr_bread(&H.r, phys, buf) == 0)
-			phys = H.r.bo->get32(buf + 4 * (lbn / (per * per)));
-		else
-			phys = 0;
-		if (phys && fsr_bread(&H.r, phys, buf) == 0)
-			phys = H.r.bo->get32(buf + 4 * ((lbn / per) % per));
-		else
-			phys = 0;
-		if (phys && fsr_bread(&H.r, phys, buf) == 0)
-			phys = H.r.bo->get32(buf + 4 * (lbn % per));
-		else
-			phys = 0;
+	uint32_t phys, slot, idx;
+	int lvl = fsr_lbn_route(H.r.laddr, H.r.nindir, lbn, &slot, &idx), L;
+
+	if (lvl < 0)
+		return 0;
+	phys = (uint32_t)addr[slot];
+	for (L = lvl; L >= 1 && phys; L--) {
+		if (fsr_bread(&H.r, phys, buf) < 0)
+			return 0;
+		phys = H.r.bo->get32(buf + 4 * fsr_ind_index(H.r.nindir, idx, L));
 	}
 	return phys;
 }

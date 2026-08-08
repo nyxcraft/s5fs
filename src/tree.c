@@ -25,6 +25,10 @@ node_new(const char *name, int kind)
 		exit(1);
 	}
 	n->name = name ? strdup(name) : NULL;
+	if (name && !n->name) {
+		perror("s5fs: strdup");
+		exit(1);
+	}
 	n->kind = kind;
 	n->perm = 0755;
 	return n;

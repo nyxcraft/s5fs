@@ -193,6 +193,25 @@ Two writers build these maps, and the difference is deliberate:
 
 Do not merge them. The first one's fidelity is the thing being protected.
 
+### One ladder, one definition
+
+The levels are **sequential**: single covers `nindir` blocks starting where the
+direct slots end, double covers `nindir²` starting where single ends, triple
+`nindir³` after that. `s5fs_setblocks` lays them down exactly that way.
+
+Every *reader* used to open-code the same ladder — `fsread.c`, `cmd_fsck.c`,
+`cmd_fsdb.c`, `s5fs_rw.c` — and three of them ended the double range at
+`nindir²` instead of `nindir + nindir²`. The last `nindir` blocks of the double
+region were therefore looked up in the **triple** indirect, so any file past
+**~8.4 MB at 512-byte blocks** (or ~67 MB at 1024) read back corrupt from that
+offset on. `fsck` stayed clean throughout, because the block *accounting* was
+consistent — only the mapping was wrong.
+
+The routing now lives once, in `fsr_lbn_route()` (declared in `fsread.h`), with
+`fsr_ind_index()` for the descent. All four readers call it. **Do not
+re-open-code this ladder** — that is the whole reason the bug existed in three
+places at once.
+
 ---
 
 ## 5. Directories

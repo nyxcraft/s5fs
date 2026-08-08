@@ -416,6 +416,10 @@ build_dir(S5FS *fs, const char *host, uint32_t ino, uint32_t parent,
 		kids[nk].isdir = S_ISDIR(st.st_mode);
 		kids[nk].hmode = st.st_mode;
 		kids[nk].host = strdup(child);
+		if (!kids[nk].host) {
+			perror("s5fs mktree");
+			exit(1);
+		}
 		strncpy(kids[nk].nm, de->d_name, sizeof kids[nk].nm - 1);
 		kids[nk].nm[sizeof kids[nk].nm - 1] = '\0';
 		if (S_ISREG(st.st_mode) && st.st_nlink > 1) {

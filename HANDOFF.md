@@ -320,6 +320,9 @@ original C — keep it that way; don't vendor copyrighted data into it.
   Add a table, fence it.
 - **Tests are not optional.** New behavior → new check in `tests/run.sh`, and it
   must end `fsck clean` if it mutates.
+- **`make fuzz`** (optional, needs python3) corrupts image metadata and runs
+  every reader over it under sanitizers. It found the unbounded `s_nfree`.
+  Worth a run after touching anything that decodes the superblock or i-list.
 - **Run `make test-san` too** when touching a parser. Anything that reads a tape,
   an archive or an image header is handling untrusted input, and an
   out-of-bounds *read* is invisible to a normal build — `make test` passes with

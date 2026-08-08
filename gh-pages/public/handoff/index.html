@@ -404,6 +404,9 @@ documentation. The data tables — <code>subcmds[]</code> in <code>s5fs.c</code>
 Add a table, fence it.</li>
 <li><strong>Tests are not optional.</strong> New behavior → new check in <code>tests/run.sh</code>, and it
 must end <code>fsck clean</code> if it mutates.</li>
+<li><strong><code>make fuzz</code></strong> (optional, needs python3) corrupts image metadata and runs
+every reader over it under sanitizers. It found the unbounded <code>s_nfree</code>.
+Worth a run after touching anything that decodes the superblock or i-list.</li>
 <li><strong>Run <code>make test-san</code> too</strong> when touching a parser. Anything that reads a tape,
 an archive or an image header is handling untrusted input, and an
 out-of-bounds <em>read</em> is invisible to a normal build — <code>make test</code> passes with

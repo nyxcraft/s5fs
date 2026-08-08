@@ -174,6 +174,17 @@ input — a crafted dump tape, a looping free list, a directory cycle — and an
 passes a plain build even with the overflow present; only the sanitizer turns it
 into a failure. <code>abort_on_error</code> is set so a sanitizer finding becomes a signal
 rather than a quiet exit 1 that a crash check reads as success.</p>
+<pre><code class="language-sh">make fuzz                  # optional: corruption fuzzer (needs python3)
+</code></pre>
+<p><code>tests/fuzz.py</code> corrupts the <strong>metadata</strong> of a seed image — superblock, sizing
+fields, i-list head — and runs every reader and the mutating commands over the
+result under sanitizers. It is deliberately not part of <code>make test</code> (which stays
+sh + coreutils and dependency-free) and CI does not run it: it is a <em>search</em>,
+not a check.</p>
+<p>It earns its place. Targeted tests cover the corruptions somebody thought of;
+this covers the ones nobody did. It found <code>fsck</code>/<code>icheck</code> indexing <code>free_[223]</code>
+of an <code>int32_t[50]</code> — <code>s_nfree</code> read off the disk and used directly as an index,
+with no upper bound — which no plain build would ever have faulted on.</p>
 <p>With the oracle available, the two checks worth re-running by hand are the ones
 the suite cannot do:</p>
 <ol>

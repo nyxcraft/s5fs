@@ -108,6 +108,7 @@ s5fs_get_fblk(S5FS *fs, int32_t bno)
 
 	s5fs_rdblk(fs, (uint32_t)bno, blk);
 	fs->s_nfree = (int16_t)fs->bo->get16(blk + P11_FB_NFREE);
+	fs->s_nfree = P11_CLAMP_NFREE(fs->s_nfree);
 	for (i = 0; i < P11_NICFREE; i++)
 		fs->s_free[i] = (int32_t)fs->bo->get32(blk + P11_FB_FREE + 4 * i);
 }
@@ -667,6 +668,7 @@ s5fs_mount(S5FS *fs, int fd, uint32_t bsize, const s5_codec *bo, int64_t base)
 	fs->s_isize = bo->get16(sb + P11_SB_ISIZE);
 	fs->s_fsize = bo->get32(sb + P11_SB_FSIZE);
 	fs->s_nfree = (int16_t)bo->get16(sb + P11_SB_NFREE);
+	fs->s_nfree = P11_CLAMP_NFREE(fs->s_nfree);
 	for (i = 0; i < P11_NICFREE; i++)
 		fs->s_free[i] = (int32_t)bo->get32(sb + P11_SB_FREE + 4 * i);
 	fs->s_ninode = (int16_t)bo->get16(sb + P11_SB_NINODE);

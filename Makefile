@@ -53,7 +53,16 @@ test-san: $(OBJSRC) $(HDRS) | $(BIN)
 	 UBSAN_OPTIONS=halt_on_error=1:abort_on_error=1 \
 	 sh tests/run.sh
 
+# Optional corruption fuzzer (needs python3).  NOT part of `make test` and CI
+# does not run it -- the suite stays sh + coreutils.  Build sanitized first,
+# or a finding is invisible: an out-of-bounds READ does not fault otherwise.
+fuzz: $(OBJSRC) $(HDRS) | $(BIN)
+	$(CC) $(SANFLAGS) $(CPPFLAGS) -o $(BIN)/s5fs-fuzz $(OBJSRC) $(FUSELIBS)
+	@python3 tests/fuzz.py --bin $(BIN)/s5fs-fuzz --iters $(ITERS)
+
+ITERS ?= 100
+
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all clean test test-san
+.PHONY: all clean test test-san fuzz

@@ -100,6 +100,7 @@ build_used(void)
 	if (fsr_bread(&R, P11_SUPERBLK, sb) < 0)
 		return;
 	nfree = (int16_t)R.bo->get16(sb + P11_SB_NFREE);
+	nfree = P11_CLAMP_NFREE(nfree);
 	for (i = 0; i < P11_NICFREE; i++)
 		fr[i] = (int32_t)R.bo->get32(sb + P11_SB_FREE + 4 * i);
 	for (;;) {
@@ -121,6 +122,7 @@ build_used(void)
 			if (fsr_bread(&R, (uint32_t)bno, fb) < 0)
 				break;
 			nfree = (int16_t)R.bo->get16(fb + P11_FB_NFREE);
+			nfree = P11_CLAMP_NFREE(nfree);
 			for (k = 0; k < P11_NICFREE; k++)
 				fr[k] = (int32_t)R.bo->get32(fb + P11_FB_FREE + 4 * k);
 		}

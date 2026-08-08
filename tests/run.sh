@@ -422,6 +422,29 @@ if [ "$btrc" -eq 0 ] && [ "$btcat" -eq 1 ] && [ "$btb0" = "BBBB" ] &&
 	ok "boot clamps an oversized bootfile to block 0"
 else no "boot clamps oversized bootfile (rc=$btrc cat=$btcat b0=$btb0)"; fi
 
+# 23. s_nfree is read off the disk and then used directly as an index into a
+#     50-entry free-block cache.  Corruption fuzzing found fsck/icheck indexing
+#     free_[223] of an int32_t[50] (UBSan: "index 223 out of bounds") -- that
+#     array is a local, so it is a real stack over-read.  Only test-san can see
+#     it; on a plain build this check just proves the tools still cope.
+"$S5" mkfs -B 512 -b 3000 "$T/nf.dsk" >/dev/null 2>&1
+"$S5" put -B 512 "$T/nf.dsk" "$T/src" /f >/dev/null 2>&1
+# s_nfree sits at byte 512+6; leave isize/fsize valid so the image still opens
+printf '\310\000' | dd of="$T/nf.dsk" bs=1 seek=518 conv=notrunc 2>/dev/null
+nfsaw=$(od -An -tu2 -j 518 -N2 "$T/nf.dsk" | tr -d ' ')
+nfbad=0
+for cmd in fsck icheck df scavenge du; do
+	tmo 20 "$S5" $cmd -B 512 "$T/nf.dsk" >/dev/null 2>&1
+	rc=$?
+	{ [ $rc -gt 128 ] || [ $rc -eq 124 ]; } && nfbad=$((nfbad + 1))
+done
+tmo 20 "$S5" mkdir -B 512 "$T/nf.dsk" /zz >/dev/null 2>&1
+[ $? -gt 128 ] && nfbad=$((nfbad + 1))
+if [ "$nfsaw" = 200 ] && [ "$nfbad" -eq 0 ] && tmo 30 "$S5" fsck -p -B 512 "$T/nf.dsk" >/dev/null 2>&1 &&
+   fsck_clean -B 512 "$T/nf.dsk"; then
+	ok "out-of-range s_nfree does not walk off the free-block cache"
+else no "out-of-range s_nfree (nfree=$nfsaw bad=$nfbad)"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

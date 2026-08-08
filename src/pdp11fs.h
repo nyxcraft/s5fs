@@ -31,6 +31,11 @@
  * ------------------------------------------------------------------ */
 
 #define P11_NICFREE	50	/* free-block cache in the superblock  */
+/* s_nfree (and a chain block's nfree) is read from disk and then used directly
+ * as an index into a P11_NICFREE-entry array.  A corrupt or hostile value walks
+ * off that array -- negative indexes the writer's cache backwards and WRITES
+ * there.  Clamp every value that comes off the disk. */
+#define P11_CLAMP_NFREE(n) ((n) < 0 ? 0 : (n) > P11_NICFREE ? P11_NICFREE : (n))
 #define P11_NICINOD	100	/* free-inode cache in the superblock  */
 #define P11_DIRSIZ	14	/* bytes of name in a directory entry  */
 #define P11_DIRENTSZ	16	/* sizeof(struct direct): 2 + DIRSIZ   */

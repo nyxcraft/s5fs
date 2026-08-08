@@ -514,6 +514,7 @@ fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 	c.isize = c.bo->get16(sb + P11_SB_ISIZE);
 	c.fsize = c.bo->get32(sb + P11_SB_FSIZE);
 	c.nfree = (int16_t)c.bo->get16(sb + P11_SB_NFREE);
+	c.nfree = P11_CLAMP_NFREE(c.nfree);
 	c.ninode = c.bo->get16(sb + P11_SB_NINODE);
 	sysv = (c.bo->get32(sb + P11_SB_MAGIC) == (uint32_t)P11_FS_MAGIC);
 	tfree_off = sysv ? P11_SB_SVTFREE : P11_SB_TFREE; /* SysV moves the totals */
@@ -610,6 +611,7 @@ fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 				uint32_t k;
 				rdblk(&c, (uint32_t)bno, fb);
 				nfree = (int16_t)c.bo->get16(fb + P11_FB_NFREE);
+				nfree = P11_CLAMP_NFREE(nfree);
 				for (k = 0; k < P11_NICFREE; k++)
 					free_[k] = (int32_t)c.bo->get32(fb + P11_FB_FREE + 4 * k);
 			}

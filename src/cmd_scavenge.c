@@ -72,7 +72,7 @@ mark_ind(uint32_t bno, int level)
 static void
 build_used(void)
 {
-	uint32_t ino, i;
+	uint32_t ino, i, nseen = 0;
 	uint8_t sb[P11_MAXBSIZE];
 	int32_t nfree, fr[P11_NICFREE];
 	used = calloc(R.fsize, 1);
@@ -106,6 +106,11 @@ build_used(void)
 		int32_t bno;
 		if (nfree <= 0)
 			break;
+		if (++nseen > R.fsize) { /* a chain that loops back on itself */
+			fprintf(stderr, "s5fs scavenge: free list loops; "
+					"carving may include chain blocks\n");
+			break;
+		}
 		bno = fr[--nfree];
 		if (bno == 0 || (uint32_t)bno < R.isize || (uint32_t)bno >= R.fsize)
 			break;

@@ -364,6 +364,13 @@ cmd_df(int argc, char **argv)
 		int32_t bno;
 		if (nfree <= 0)
 			break;
+		/* A corrupt chain can point back at itself; the list cannot
+		 * legitimately hold more entries than the volume has blocks. */
+		if (dfree >= dtot) { /* a chain that points back at itself */
+			fprintf(stderr, "df: free list loops; free count is unreliable\n");
+			dfree = dtot; /* clamp: `used` is unsigned and would wrap */
+			break;
+		}
 		bno = fr[--nfree];
 		if (bno == 0 || (uint32_t)bno < r.isize || (uint32_t)bno >= r.fsize)
 			break;

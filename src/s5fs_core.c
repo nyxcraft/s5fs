@@ -262,6 +262,10 @@ s5fs_iput(S5FS *fs, s5fs_inode *in, int ibc, int32_t *ib)
 uint32_t
 s5fs_ialloc(S5FS *fs)
 {
+	if (fs->ino >= P11_MAXINO) {
+		s5fs_fail(fs, "out of inode numbers (16-bit limit)");
+		return 0;
+	}
 	return ++fs->ino;
 }
 
@@ -580,6 +584,13 @@ s5fs_begin(S5FS *fs, int fd, uint32_t nblocks, const s5fs_opts *opts)
 
 	/* i-list size: mkfs's size-mode heuristic, or an explicit minimum. */
 	if (opts->ninode) {
+		if (opts->ninode > P11_MAXINO) {
+			snprintf(fs->err, sizeof fs->err,
+				 "too many inodes: %lu; s5fs inode numbers are 16-bit, max %u",
+				 (unsigned long)opts->ninode, P11_MAXINO);
+			fs->error = 1;
+			return -1;
+		}
 		ninodeblks = (opts->ninode + fs->inopb - 1) / fs->inopb;
 	}
 	else {

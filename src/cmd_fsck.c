@@ -597,6 +597,14 @@ fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 				fprintf(stderr, "  ! block %d free AND used\n", bno);
 				c.errors++;
 			}
+			/* A block already on the free list means the chain loops back
+			 * on itself.  Without this the traversal never terminates --
+			 * and fsck is the tool you point at a damaged image. */
+			if (c.use[bno] & 0x80) {
+				fprintf(stderr, "  ! free list loops (block %d seen twice)\n", bno);
+				c.errors++;
+				break;
+			}
 			c.use[bno] |= 0x80;
 			if (nfree <= 0) { /* this block chains the list */
 				uint32_t k;

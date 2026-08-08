@@ -44,6 +44,13 @@
  * Fs4b).  2048 is the family maximum -- the superblock's block-size code only
  * defines up to Fs4b; bigger blocks are FFS, a different filesystem. */
 #define P11_BSIZE_OK(b)	((b) == 512 || (b) == 1024 || (b) == 2048)
+/* A directory entry's inode field, and dinode numbering, are 16-bit, so 65535
+ * is the highest inode number the format can express.  Past it every number
+ * wraps: inode 65536 becomes 0, and itod(0) resolves to block 1 -- the
+ * SUPERBLOCK.  A tree with more entries than this used to be written happily
+ * and destroy the filesystem it was being written into. */
+#define P11_MAXINO	65535U
+
 #define P11_MAXFSBLKS	(1UL << 24)	/* max blocks: di_addr is a 3-byte (24-bit)
 					 * block number, so a filesystem can hold at
 					 * most 2^24 blocks (16G @1K, 8G @512) */

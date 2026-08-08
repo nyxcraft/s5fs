@@ -256,6 +256,11 @@ correctly for small files and corrupts at the first indirect block.</p>
 </table>
 <p><code>s_isize</code> being a 16-bit field is where the <strong>≈1M inode ceiling</strong> comes from:
 at most 65533 i-list blocks.</p>
+<p>A tighter limit binds first: <strong>inode numbers are 16-bit</strong>, so 65535 is the
+highest one expressible. Number 65536 wraps to 0, and <code>itod(0)</code> resolves to
+block 1 — the superblock. <code>mkfs</code>/<code>mktree</code>/<code>tar x</code> now refuse a tree needing
+more (<code>P11_MAXINO</code>); they used to write it happily and destroy the filesystem
+they were writing into, reporting success.</p>
 <p><code>s_lasti</code> and <code>s_nbehind</code> are kernel search hints and carry no consistency
 meaning; nothing here depends on them.</p>
 <h3 id="the-system-v-dialect">The System V dialect</h3>

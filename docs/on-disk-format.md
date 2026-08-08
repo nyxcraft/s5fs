@@ -81,6 +81,12 @@ correctly for small files and corrupts at the first indirect block.
 `s_isize` being a 16-bit field is where the **≈1M inode ceiling** comes from:
 at most 65533 i-list blocks.
 
+A tighter limit binds first: **inode numbers are 16-bit**, so 65535 is the
+highest one expressible. Number 65536 wraps to 0, and `itod(0)` resolves to
+block 1 — the superblock. `mkfs`/`mktree`/`tar x` now refuse a tree needing
+more (`P11_MAXINO`); they used to write it happily and destroy the filesystem
+they were writing into, reporting success.
+
 `s_lasti` and `s_nbehind` are kernel search hints and carry no consistency
 meaning; nothing here depends on them.
 

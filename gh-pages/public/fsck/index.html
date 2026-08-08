@@ -216,6 +216,11 @@ check meaningful.</li>
 <li><strong>Reference counts saturate.</strong> Don't switch to a wrapping counter to save a
 byte.</li>
 <li><strong>Inode 1 is legitimately unreferenced.</strong> Keep it whitelisted.</li>
+<li><strong>The free list can loop too.</strong> A chain block pointing back at itself spun
+<code>fsck</code>, <code>icheck</code>, <code>df</code> and <code>scavenge</code> forever. The block check now reports
+<code>free list loops</code> when a block appears on the list twice (the <code>0x80</code> bit was
+already being set — it just was not being <em>tested</em>), and <code>-p</code> rebuilds the
+list. Any new free-list walker needs the same bound.</li>
 <li><strong>Every recursive walker needs its own cycle guard.</strong> Phase 3 keeps
 <code>reached[]</code>; <code>fsck -l</code>'s lister keeps <code>seen[]</code>; the readers outside this file
 use <code>fsr_walkset</code>. A cycle is representable on disk, so a walker without one

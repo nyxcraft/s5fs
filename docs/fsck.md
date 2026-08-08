@@ -163,6 +163,11 @@ afterwards to clean up the references it just orphaned.
 - **Reference counts saturate.** Don't switch to a wrapping counter to save a
   byte.
 - **Inode 1 is legitimately unreferenced.** Keep it whitelisted.
+- **The free list can loop too.** A chain block pointing back at itself spun
+  `fsck`, `icheck`, `df` and `scavenge` forever. The block check now reports
+  `free list loops` when a block appears on the list twice (the `0x80` bit was
+  already being set — it just was not being *tested*), and `-p` rebuilds the
+  list. Any new free-list walker needs the same bound.
 - **Every recursive walker needs its own cycle guard.** Phase 3 keeps
   `reached[]`; `fsck -l`'s lister keeps `seen[]`; the readers outside this file
   use `fsr_walkset`. A cycle is representable on disk, so a walker without one

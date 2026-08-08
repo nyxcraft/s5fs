@@ -265,6 +265,48 @@ if cmp -s "$T/bigtr/big" "$T/bg2.out" && cmp -s "$T/bigtr/big" "$T/bg3.out"; the
 	ok "large file survives tar and dump round-trips"
 else no "large file survives tar and dump round-trips"; fi
 
+# 17. inode numbers are 16-bit on disk, so more than 65535 of them cannot be
+#     expressed: number 65536 wraps to 0 and itod(0) lands on block 1 -- the
+#     SUPERBLOCK.  mktree used to write such a tree happily and report success
+#     while destroying the filesystem (root unreadable, every inode orphaned).
+#     mkfs -i drives the same guard without materialising 65k files.
+"$S5" mkfs -b 200000 -i 70000 "$T/ino.dsk" >/dev/null 2>&1; inobad=$?
+"$S5" mkfs -b 200000 -i 65000 "$T/ino2.dsk" >/dev/null 2>&1; inook=$?
+if [ "$inobad" -ne 0 ] && [ "$inook" -eq 0 ] && fsck_clean "$T/ino2.dsk"; then
+	ok "more than 65535 inodes refused"
+else no "more than 65535 inodes refused (over=$inobad under=$inook)"; fi
+
+# 18. a free-list chain block that points at ITSELF must not spin the tools.
+#     fsck, icheck, df and scavenge all walk the chain, and all four looped
+#     forever -- on exactly the damaged images those tools exist to inspect.
+#     (fsdb rewrites the superblock on exit, so corrupt the chain block the
+#     superblock already points at rather than the superblock itself.)
+#     Hex is decoded in awk: "16#nn" is a bashism and this suite runs under sh.
+"$S5" mkfs -a le -d rl02 "$T/fl.dsk" >/dev/null 2>&1
+flb=$(printf 'block 1\nquit\n' | "$S5" fsdb "$T/fl.dsk" 2>/dev/null | awk '
+	/^  0000 / {
+		for (i = 0; i < 16; i++) V[sprintf("%x", i)] = i
+		lo = V[substr($10, 1, 1)] * 16 + V[substr($10, 2, 1)]
+		hi = V[substr($11, 1, 1)] * 16 + V[substr($11, 2, 1)]
+		print hi * 256 + lo
+		exit
+	}')
+if [ -n "$flb" ] && [ "$flb" -gt 0 ]; then
+	fllo=$(printf '%02x' $((flb % 256))); flhi=$(printf '%02x' $((flb / 256)))
+	printf 'poke %s 0 01 00\npoke %s 2 %s %s 00 00\nquit\n' "$flb" "$flb" "$fllo" "$flhi" |
+		"$S5" fsdb -w "$T/fl.dsk" >/dev/null 2>&1
+	flhang=0
+	for cmd in scavenge df icheck fsck; do
+		timeout 20 "$S5" $cmd "$T/fl.dsk" >/dev/null 2>&1
+		[ $? -eq 124 ] && flhang=$((flhang + 1))
+	done
+	flsaw=$(timeout 20 "$S5" fsck "$T/fl.dsk" 2>&1 | grep -c 'free list loops')
+	timeout 20 "$S5" fsck -p "$T/fl.dsk" >/dev/null 2>&1     # must be able to repair it
+	if [ "$flhang" -eq 0 ] && [ "$flsaw" -ge 1 ] && fsck_clean "$T/fl.dsk"; then
+		ok "looping free list is diagnosed and repaired"
+	else no "looping free list (hung=$flhang diagnosed=$flsaw)"; fi
+else no "looping free list (could not build the fixture)"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

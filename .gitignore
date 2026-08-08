@@ -1,1 +1,4 @@
 bin/
+
+# built docs site (gh-pages/build_site.py regenerates it; published by Actions)
+gh-pages/public/

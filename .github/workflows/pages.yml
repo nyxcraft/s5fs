@@ -1,0 +1,59 @@
+name: Build and deploy docs to GitHub Pages
+
+# Builds the static docs site (the repo's Markdown + gh-pages/) and publishes it via GitHub
+# Pages. Set Settings -> Pages -> Source to "GitHub Actions" once; nothing is committed to the
+# repo, since the built site lives only in the Pages artifact (gh-pages/public/ is gitignored).
+#
+# The sources are the documentation the repo already carries, rendered rather than duplicated:
+# README.md, HANDOFF.md, and everything under docs/. Editing a doc is the only step -- there is
+# no second copy of it here to keep in step.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'HANDOFF.md'
+      - 'docs/**'
+      - 'gh-pages/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install markdown-it-py
+        run: pip install markdown-it-py
+      - name: Build site
+        run: python3 gh-pages/build_site.py
+      - name: Check for broken internal links
+        run: python3 gh-pages/check_links.py
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: gh-pages/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,81 @@
+{
+  "site_name": "s5fs",
+  "site_tagline": "Host tools for the traditional Unix filesystem, as disk images.",
+  "site_description": "Create, inspect, edit, repair and convert the V7 / System V filesystem — s5fs — as SIMH-style disk images, on a modern host, with no kernel support and nothing mounted. One faithful port of 2.9BSD's filesystem writer underneath every command, so the images are the ones the era's own fsck and kernel expect.",
+  "github_href": "https://github.com/nyxcraft/s5fs",
+  "branch": "main",
+  "copyright": "Nicholas J. Kisseberth",
+  "status": "beta",
+  "attribution": [
+    "Software Architecture, Design & Engineering by Nicholas J. Kisseberth."
+  ],
+
+  "groups": [
+    { "id": "start",     "name": "Start here" },
+    { "id": "format",    "name": "The format" },
+    { "id": "engine",    "name": "The engine" },
+    { "id": "reference", "name": "Reference" }
+  ],
+
+  "docs": [
+    { "slug": "overview", "source": "README.md", "template": "page", "group": "start",
+      "title": "Overview",
+      "tagline": "What it is, and every command",
+      "blurb": "The quick reference: the full subcommand list, the common options, and a worked example of each major workflow.",
+      "featured": true },
+
+    { "slug": "user-guide", "source": "docs/user-guide.md", "group": "start",
+      "title": "User guide",
+      "tagline": "The manual",
+      "blurb": "Task-oriented: making a filesystem, moving files in and out without mounting anything, the interactive shell, checking and repairing, and the limits.",
+      "featured": true },
+
+    { "slug": "design", "source": "docs/design.md", "group": "start",
+      "title": "Design",
+      "tagline": "The architecture",
+      "blurb": "The layer cake, the one-mutation-path rule that keeps every front-end honest, the design invariants, and what is deliberately out of scope.",
+      "featured": true },
+
+    { "slug": "on-disk-format", "source": "docs/on-disk-format.md", "group": "format",
+      "tagline": "What is on the platter",
+      "blurb": "Superblock, inodes, directories and block maps, field by field — including the System V dialect and the block-size profiles that change how many address slots an inode has.",
+      "featured": true },
+
+    { "slug": "byte-order", "source": "docs/byte-order.md", "group": "format",
+      "tagline": "Three codecs, one structure",
+      "blurb": "The same layout ran on machines that disagreed about integers. PDP-11 middle-endian, the l3 three-byte packing that is not a truncation of anything, and how a reader works out which it is looking at." },
+
+    { "slug": "allocator", "source": "docs/allocator.md", "group": "format",
+      "tagline": "The chained free list",
+      "blurb": "Free space threaded through the free blocks themselves, laid out in a rotational permutation — and why that makes files non-contiguous and undelete impossible." },
+
+    { "slug": "mutation-engine", "source": "docs/mutation-engine.md", "group": "engine",
+      "tagline": "The one write path",
+      "blurb": "Two page-cache-coherent descriptors on one image, the block map, and the file operations that the batch commands, the shell and the FUSE mount all share." },
+
+    { "slug": "shell", "source": "docs/shell.md", "group": "engine",
+      "tagline": "A small VFS",
+      "blurb": "Mount any number of images at arbitrary paths, route every path by longest prefix, and copy between two different disks in one command." },
+
+    { "slug": "fsck", "source": "docs/fsck.md", "group": "engine",
+      "tagline": "The independent checker",
+      "blurb": "It shares no code with the writer on purpose, which is what makes a clean check evidence rather than a tautology. The three phases, the repairs, and the orphan-directory trap." },
+
+    { "slug": "containers", "source": "docs/containers.md", "group": "engine",
+      "tagline": "Tapes and disk containers",
+      "blurb": "The real 2.9BSD dump tape format, the SIMH .tap framing that wraps it, and the fixed-VHD footer that lets a hypervisor attach a raw image." },
+
+    { "slug": "partitions", "source": "docs/partitions.md", "group": "reference",
+      "tagline": "Geometry without a label",
+      "blurb": "There is nothing on the platter that says where a partition begins. The kernel had the table compiled in, and this mirrors it — plus the grow-only rule that keeps a whole-disk image intact." },
+
+    { "slug": "validation", "source": "docs/validation.md", "group": "reference",
+      "tagline": "How correctness was established",
+      "blurb": "The byte-fidelity standard, the three levels of evidence, what a native restor(8) proved that our own reader could not, and what a maintainer can re-run.",
+      "featured": true },
+
+    { "slug": "handoff", "source": "HANDOFF.md", "template": "page", "group": "reference",
+      "tagline": "For the next maintainer",
+      "blurb": "The builder's orientation: how the repo came to be, what to read in what order, the invariants to keep, and the already-fixed bugs not to reintroduce." }
+  ]
+}

@@ -11,6 +11,26 @@ Everything sits on one faithful C99 port of 2.9BSD's filesystem writer, so the
 images are the ones the era's own `fsck`/kernel expect -- the same byte-fidelity
 bar the cross `as`/`cc` are held to.
 
+## Documentation
+
+This README is the quick reference.  `docs/` holds the full set:
+
+| document | what it covers |
+|---|---|
+| [`docs/user-guide.md`](docs/user-guide.md) | task-oriented manual: the commands, workflows, limits |
+| [`docs/design.md`](docs/design.md) | the architecture: the layer cake, the one-mutation-path rule, the invariants |
+| [`docs/on-disk-format.md`](docs/on-disk-format.md) | superblock, inodes, directories, the SysV dialect |
+| [`docs/byte-order.md`](docs/byte-order.md) | the three codecs, middle-endian, `l3`, auto-detection |
+| [`docs/allocator.md`](docs/allocator.md) | the chained free list, rotational interleave, why undelete is impossible |
+| [`docs/mutation-engine.md`](docs/mutation-engine.md) | the RW handle, block maps, the shared file operations |
+| [`docs/shell.md`](docs/shell.md) | the multi-mount VFS: routing, cross-image `cp` |
+| [`docs/fsck.md`](docs/fsck.md) | the three phases, `-p` repair, the orphan-directory trap |
+| [`docs/containers.md`](docs/containers.md) | dump tapes, SIMH `.tap` framing, fixed VHD |
+| [`docs/partitions.md`](docs/partitions.md) | disk geometry, partition tables, the base offset |
+| [`docs/validation.md`](docs/validation.md) | the correctness standard and the evidence for it |
+
+`HANDOFF.md` is the incoming-maintainer orientation.
+
 ## Commands
 
     s5fs mkfs      create an (empty) filesystem image

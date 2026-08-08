@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ site_name }} | Tools for the traditional Unix filesystem</title>
+  <meta name="description" content="{{ site_description }}">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body class="site-home">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="page-shell">
+    <header class="site-header">
+      <a class="brand" href="index.html">
+        <img class="brand__icon" src="{{ logo_href }}" alt="" aria-hidden="true">
+        <span class="brand__name">{{ site_name }}</span>{{ status_badge }}
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+{{ top_nav }}
+        <a href="{{ github_href }}">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="main-content" tabindex="-1">
+      <section class="hero">
+        <div class="hero__copy">
+          <h1>The filesystem UNIX shipped, on the machine you have.</h1>
+          {{ attribution_hero }}
+          <p class="hero__lede">{{ site_description }}</p>
+          <div class="hero__actions">
+            <a class="button button--primary" href="{{ primary_href }}">Start here</a>
+            <a class="button" href="{{ secondary_href }}">How it works</a>
+          </div>
+        </div>
+        <div class="hero__visual" role="img" aria-label="Every front end — mkfs, mktree, tar, restore and the interactive shell — funnels into one mutation engine over one ported filesystem writer, which produces a disk image the era's own fsck and kernel accept.">
+          <div class="flow">
+            <div class="flow__node flow__node--hub"><span>a host tree, a tar, a dump tape</span><strong>whatever you have</strong></div>
+            <div class="flow__arrow" aria-hidden="true">↓</div>
+            <div class="flow__fan">
+              <span>mkfs</span><span>mktree</span><span>tar</span><span>restore</span><span>shell</span>
+            </div>
+            <div class="flow__arrow" aria-hidden="true">↓</div>
+            <div class="flow__node"><span>one mutation engine, one writer core</span><strong>an image its own fsck accepts</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-strip" aria-label="Core ideas">
+        <article>
+          <h2>Exactly one mutation path</h2>
+          <p>One faithful port of 2.9BSD's <code>mkfs</code> owns the allocator and the inode and directory writers; one engine owns every high-level operation. The batch commands, the interactive shell and the FUSE mount all call it, so a front end cannot invent a subtly different filesystem, and a fix lands once.</p>
+        </article>
+        <article>
+          <h2>One structure, three byte orders</h2>
+          <p>s5fs had the same layout on every machine that ran it — only the encoding of multi-byte fields followed the CPU. No host struct is ever laid over disk bytes, so PDP-11 middle-endian, VAX and little-endian, and big-endian images all come out of the same writer.</p>
+        </article>
+        <article>
+          <h2>Byte fidelity, not “fsck is happy”</h2>
+          <p>A filesystem writer has a large space of outputs that pass every check you would naturally write and are still wrong. So the checker shares no code with the writer, and a tape written here is validated and rebuilt by the era's own <code>restor(8)</code> under emulation.</p>
+        </article>
+      </section>
+
+      <section class="docs-panel">
+        <div class="section-heading">
+          <p class="eyebrow">The documentation</p>
+          <h2>One binary, and the reasoning behind it.</h2>
+        </div>
+        <div class="tool-catalog">
+{{ doc_groups }}
+        </div>
+      </section>
+
+      <section class="docs-panel">
+        <div class="section-heading">
+          <p class="eyebrow">Documentation</p>
+          <h2>Start here.</h2>
+        </div>
+        <div class="doc-grid">
+{{ docs_cards }}
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>© {{ year }} {{ copyright }} · <a href="{{ home_href }}">{{ site_name }}</a> · <a href="{{ license_href }}">License</a></p>
+      {{ attribution }}
+    </footer>
+  </div>
+</body>
+</html>

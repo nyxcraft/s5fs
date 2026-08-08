@@ -10,6 +10,14 @@ established, what's deliberately out of scope, and where the bodies are buried.
 
 Read this top-to-bottom once, then keep §5 (invariants) and §9 (gotchas) nearby.
 
+**`docs/` has the depth this document only summarizes** — one file per
+subsystem, each ending in a maintainer checklist. Start with
+[`docs/design.md`](docs/design.md); the format itself is
+[`docs/on-disk-format.md`](docs/on-disk-format.md), the free list and the limits
+of recovery are [`docs/allocator.md`](docs/allocator.md), and the evidence
+behind §8 is [`docs/validation.md`](docs/validation.md). The full index is in
+`README.md`.
+
 ---
 
 ## 1. What this is, in one breath
@@ -294,8 +302,9 @@ original C — keep it that way; don't vendor copyrighted data into it.
 
 ## 11. Conventions
 
-- **Commits:** on a topic branch, not `main` directly, and end the message with:
-  `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
+- **Commits:** directly on `main`. **No `Co-Authored-By` trailers** — the history
+  was rewritten once to strip them, so adding one back reintroduces what that
+  rewrite removed.
 - **Nothing gets pushed to any remote** without an explicit ask.
 - **No external dependencies** in the default build. FUSE is the sole opt-in.
 - **Style:** match the surrounding code — tabs, terse comments that explain

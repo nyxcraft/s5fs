@@ -44,8 +44,9 @@ This repo was **split out of a larger monorepo**, `~/pdp11-bsd29-toolchain`
 work lived there under `diskimage/` and was extracted with
 `git subtree split --prefix=diskimage`, which reparented `diskimage/src → src`
 etc. and dropped every commit that didn't touch `diskimage/`. The result was
-pulled into this fresh repo. **History is preserved** — the 11 commits here are
-the real ones, authorship and dates intact.
+pulled into this fresh repo. **History is preserved** — the commits carried over
+from the split are the real ones, authorship and dates intact. (Counting them is
+a moving target; the split ones are those with the `diskimage:` prefix.)
 
 Consequences you should know:
 
@@ -69,7 +70,7 @@ Dependency-free by default — just a C99 compiler and make:
 
 ```sh
 make            # builds bin/s5fs  (CFLAGS: -std=c99 -O2 -Wall -Wextra -pedantic)
-make test       # builds, then runs tests/run.sh  (self-contained, ~27 checks)
+make test       # builds, then runs tests/run.sh  (self-contained, ~49 checks)
 make clean
 make FUSE=1     # additionally compiles the `mount`/`umount` subcommands
                 # (needs libfuse3-dev + pkg-config; everything else unchanged)
@@ -337,7 +338,7 @@ original C — keep it that way; don't vendor copyrighted data into it.
 
 ## 12. Suggested first moves for the incoming engineer
 
-1. `make && make test` — confirm 27/27 green on your host.
+1. `make && make test` — confirm 49/49 green on your host.
 2. Read in this order: `pdp11fs.h` → `s5endian.h` → `fsread.h` → `s5fs_core.h`
    → `s5fs_rw.h` → `s5fs.c`. That's the whole design in ~6 headers.
 3. Skim `tests/run.sh` — it's the fastest tour of what the tool actually does.

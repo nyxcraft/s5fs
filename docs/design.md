@@ -182,7 +182,7 @@ Deliberate, and not defects to be fixed:
 
 ## 7. Testing
 
-`make test` runs `tests/run.sh` — 27 checks, self-contained (it builds all its
+`make test` runs `tests/run.sh` — 49 checks, self-contained (it builds all its
 own fixtures and needs no external historical data) and dependency-free (`sh`
 plus coreutils).
 
@@ -219,6 +219,10 @@ New behavior gets a check. If it mutates, the check ends `fsck clean`.
 - **Orphan directories are not link-count-zero.** A directory always has
   `nlink ≥ 1` from its own `.`, so orphans are found by reachability, not by
   link count.
+- **`tree.c` never frees its tree, on purpose.** It is the working set until
+  serialization ends and the process exits immediately after; `make test-san`
+  therefore runs with `detect_leaks=0`. Don't "fix" the leak, and don't turn
+  leak detection on without expecting it.
 - **Don't vendor copyrighted data into this repo.** The validation oracle —
   emulators, native tool binaries, original release trees — lives outside it and
   is deliberately not committable. See [`validation.md`](validation.md).

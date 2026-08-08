@@ -336,7 +336,7 @@ toolkit is the finished deliverable on its own terms.</li>
 </ul>
 <hr />
 <h2 id="7-testing">7. Testing</h2>
-<p><code>make test</code> runs <code>tests/run.sh</code> — 27 checks, self-contained (it builds all its
+<p><code>make test</code> runs <code>tests/run.sh</code> — 49 checks, self-contained (it builds all its
 own fixtures and needs no external historical data) and dependency-free (<code>sh</code>
 plus coreutils).</p>
 <p>The character of the suite: <strong>every mutating flow ends by asserting <code>s5fs fsck</code>
@@ -368,6 +368,10 @@ one partition's size.</li>
 <li><strong>Orphan directories are not link-count-zero.</strong> A directory always has
 <code>nlink ≥ 1</code> from its own <code>.</code>, so orphans are found by reachability, not by
 link count.</li>
+<li><strong><code>tree.c</code> never frees its tree, on purpose.</strong> It is the working set until
+serialization ends and the process exits immediately after; <code>make test-san</code>
+therefore runs with <code>detect_leaks=0</code>. Don't &quot;fix&quot; the leak, and don't turn
+leak detection on without expecting it.</li>
 <li><strong>Don't vendor copyrighted data into this repo.</strong> The validation oracle —
 emulators, native tool binaries, original release trees — lives outside it and
 is deliberately not committable. See <a href="../validation/index.html"><code>validation.md</code></a>.</li>

@@ -45,6 +45,14 @@ test: $(BIN)/s5fs
 # abort_on_error is the point: by default ASan prints and exits 1, which a test
 # checking "did it crash?" reads as success.  Aborting turns a sanitizer finding
 # into a signal, so the existing crash checks catch it.
+#
+# detect_leaks is OFF deliberately, not by oversight.  tree.c builds the whole
+# in-memory filesystem tree and never frees it: it is the working set until
+# tree_serialize() finishes, and the process exits immediately after, so
+# freeing it would be ceremony.  LeakSanitizer reports every node (951 bytes
+# over a small tar), which would drown the findings that matter.  If you want
+# to audit allocation lifetimes, run with detect_leaks=1 by hand and expect
+# tree.c's nodes.
 SANFLAGS := -std=c99 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 test-san: $(OBJSRC) $(HDRS) | $(BIN)
 	$(CC) $(SANFLAGS) $(CPPFLAGS) -o $(BIN)/s5fs-san $(OBJSRC) $(FUSELIBS)

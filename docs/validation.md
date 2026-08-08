@@ -89,7 +89,7 @@ isolated, each `fsck`s clean independently, and `-P a` mounts and reads the real
 
 ## 3. The automated suite
 
-`make test` — 27 checks, self-contained and dependency-free. It builds all its
+`make test` — 49 checks, self-contained and dependency-free. It builds all its
 own fixtures, so it needs **no historical data** and runs anywhere.
 
 What it covers: `mkfs`, put/get byte-identity, mkdir/cp/mv/rm, the `@` host

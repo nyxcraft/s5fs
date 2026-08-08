@@ -74,8 +74,9 @@ m68k), so the tool runs and the images are portable across any modern host.</p>
 work lived there under <code>diskimage/</code> and was extracted with
 <code>git subtree split --prefix=diskimage</code>, which reparented <code>diskimage/src → src</code>
 etc. and dropped every commit that didn't touch <code>diskimage/</code>. The result was
-pulled into this fresh repo. <strong>History is preserved</strong> — the 11 commits here are
-the real ones, authorship and dates intact.</p>
+pulled into this fresh repo. <strong>History is preserved</strong> — the commits carried over
+from the split are the real ones, authorship and dates intact. (Counting them is
+a moving target; the split ones are those with the <code>diskimage:</code> prefix.)</p>
 <p>Consequences you should know:</p>
 <ul>
 <li><strong>Commit messages still carry the <code>diskimage:</code> prefix.</strong> That's the honest
@@ -94,7 +95,7 @@ and was never committable — see §8).</li>
 <h2 id="3-build-test-run">3. Build, test, run</h2>
 <p>Dependency-free by default — just a C99 compiler and make:</p>
 <pre><code class="language-sh">make            # builds bin/s5fs  (CFLAGS: -std=c99 -O2 -Wall -Wextra -pedantic)
-make test       # builds, then runs tests/run.sh  (self-contained, ~27 checks)
+make test       # builds, then runs tests/run.sh  (self-contained, ~49 checks)
 make clean
 make FUSE=1     # additionally compiles the `mount`/`umount` subcommands
                 # (needs libfuse3-dev + pkg-config; everything else unchanged)
@@ -420,7 +421,7 @@ the bug present.</li>
 <hr />
 <h2 id="12-suggested-first-moves-for-the-incoming-engineer">12. Suggested first moves for the incoming engineer</h2>
 <ol>
-<li><code>make &amp;&amp; make test</code> — confirm 27/27 green on your host.</li>
+<li><code>make &amp;&amp; make test</code> — confirm 49/49 green on your host.</li>
 <li>Read in this order: <code>pdp11fs.h</code> → <code>s5endian.h</code> → <code>fsread.h</code> → <code>s5fs_core.h</code>
 → <code>s5fs_rw.h</code> → <code>s5fs.c</code>. That's the whole design in ~6 headers.</li>
 <li>Skim <code>tests/run.sh</code> — it's the fastest tour of what the tool actually does.</li>

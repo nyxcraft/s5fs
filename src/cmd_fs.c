@@ -452,8 +452,10 @@ cmd_ls(int argc, char **argv)
 	if ((in.mode & P11_IFMT) == P11_IFDIR)
 		fsr_readdir(&h.r, &in, ls_one, &ctx);
 	else { /* a single file */
-		const char *base = strrchr(path, '/');
-		ls_one(&ctx, ino, base ? base + 1 : path);
+		const char *leaf = strrchr(path, '/'); /* not `base`: that is the
+							* partition byte offset in
+							* this same function */
+		ls_one(&ctx, ino, leaf ? leaf + 1 : path);
 	}
 	rw_close(&h);
 	(void)i;

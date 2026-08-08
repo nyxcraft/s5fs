@@ -9,7 +9,7 @@
  * interactive shell (cmd_shell.c) use.  Reads go through the fsread reader
  * (H.r); every mutation is an rw_* call.  Read-only unless mounted with -w.
  *
- * usage: s5fs mount [-B 512|1024] [-A pdp11|le|be] [-w] [-f] image mountpoint
+ * usage: s5fs mount [-B 512|1024|2048] [-A pdp11|le|be] [-w] [-f] image mountpoint
  *        s5fs umount mountpoint
  */
 
@@ -268,12 +268,12 @@ cmd_mount(int argc, char **argv)
 			ospec = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: s5fs mount [-B 512|1024] [-A pdp11|le|be] [-w] [-f] [-d dev -P part | -o blk] image mountpoint\n");
+			fprintf(stderr, "usage: s5fs mount [-B 512|1024|2048] [-A pdp11|le|be] [-w] [-f] [-d dev -P part | -o blk] image mountpoint\n");
 			return 2;
 		}
 	}
 	if (optind != argc - 2) {
-		fprintf(stderr, "usage: s5fs mount [-B 512|1024] [-A pdp11|le|be] [-w] [-f] [-d dev -P part | -o blk] image mountpoint\n");
+		fprintf(stderr, "usage: s5fs mount [-B 512|1024|2048] [-A pdp11|le|be] [-w] [-f] [-d dev -P part | -o blk] image mountpoint\n");
 		return 2;
 	}
 	image = argv[optind];

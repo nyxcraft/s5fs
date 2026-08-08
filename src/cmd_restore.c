@@ -21,7 +21,7 @@
  * UCB dumps).  -B sets that record size AND the target block size (a faithful
  * restore keeps the block size); target byte order is PDP-11 to match.
  *
- * usage: s5fs restore [-B 512|1024] [-d device | -b blocks | -s sectors] dumpfile image
+ * usage: s5fs restore [-B 512|1024|2048] [-d device | -b blocks | -s sectors] dumpfile image
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -75,7 +75,7 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-		"usage: s5fs restore [-B 512|1024] [-d device | -b blocks | -s sectors]\n"
+		"usage: s5fs restore [-B 512|1024|2048] [-d device | -b blocks | -s sectors]\n"
 		"                    dumpfile image\n");
 	exit(2);
 }
@@ -369,6 +369,10 @@ cmd_restore(int argc, char **argv)
 		dev0 = dr.bo->get24(hdr + D_ADDR);
 		nblk = (uint32_t)((size + opts.bsize - 1) / opts.bsize);
 		da = nblk ? malloc(nblk * sizeof *da) : NULL;
+		if (nblk && !da) {
+			fprintf(stderr, "s5fs restore: out of memory\n");
+			break;
+		}
 
 		memset(&in, 0, sizeof in);
 		in.number = (uint16_t)inum;

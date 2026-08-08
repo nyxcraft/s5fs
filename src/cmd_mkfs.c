@@ -5,7 +5,7 @@
  * tar->dsk / tree->dsk front-ends to come).  Size comes from a known device
  * (-d, see `s5fs devices`), filesystem blocks (-b), or 512-byte sectors (-s).
  *
- * usage: s5fs mkfs [-B 512|1024] [-d device | -b blocks | -s sectors]
+ * usage: s5fs mkfs [-B 512|1024|2048] [-d device | -b blocks | -s sectors]
  *                  [-r release] [-m m] [-n n] [-t mtime] [-i ninode] image
  */
 

@@ -163,6 +163,10 @@ afterwards to clean up the references it just orphaned.
 - **Reference counts saturate.** Don't switch to a wrapping counter to save a
   byte.
 - **Inode 1 is legitimately unreferenced.** Keep it whitelisted.
+- **Every recursive walker needs its own cycle guard.** Phase 3 keeps
+  `reached[]`; `fsck -l`'s lister keeps `seen[]`; the readers outside this file
+  use `fsr_walkset`. A cycle is representable on disk, so a walker without one
+  recurses until the stack is exhausted.
 - **Repair order matters**: zero dangling entries *before* rewriting link
   counts.
 - **`fsck` prints `clean` on the last line** when it finds nothing. The test

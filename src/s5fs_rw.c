@@ -227,6 +227,20 @@ bfree_at(RW *h, uint8_t *ds, uint32_t lbn)
 	}
 }
 
+/* A directory entry holds exactly P11_DIRSIZ name bytes and no terminator, so a
+ * longer name simply cannot be represented.  Truncating it silently is worse
+ * than refusing: the write path would store the first 14 bytes while namei
+ * still compares the full name, so the file would be unreachable under the name
+ * the caller used, a second such name would produce a DUPLICATE on-disk entry,
+ * and fsck would call the result clean.  Refuse instead. */
+static int
+name_ok(const char *leaf)
+{
+	size_t l = strlen(leaf);
+
+	return l > 0 && l <= P11_DIRSIZ;
+}
+
 /* parent directory inode of `path`, with the leaf name copied to `leaf` */
 static uint32_t
 parent_of(RW *h, const char *path, char *leaf, size_t leafsz)
@@ -294,8 +308,9 @@ dir_add(RW *h, uint32_t pino, const char *name, uint32_t cino)
 	uint8_t *ds;
 	int dirty = 0;
 	size_t l = strlen(name);
-	if (l > P11_DIRSIZ)
-		l = P11_DIRSIZ;
+
+	if (!name_ok(name)) /* defence in depth; callers check first */
+		return -ENAMETOOLONG;
 
 	rw_ino_loc(h, pino, &pblk, &poff);
 	s5fs_rdblk(&h->w, pblk, pb);
@@ -452,6 +467,49 @@ set_dotdot(RW *h, uint32_t dino, uint32_t newparent)
 	s5fs_wtblk(&h->w, phys, db);
 }
 
+static int
+dotdot_cb(void *arg, uint32_t ino, const char *name)
+{
+	if (strcmp(name, "..") == 0) {
+		*(uint32_t *)arg = ino;
+		return 1;
+	}
+	return 0;
+}
+
+/* Is `anc` equal to, or an ancestor of, directory `dino`?  Walks ".." to the
+ * root.
+ *
+ * Renaming a directory into its own subtree has to be refused (POSIX gives it
+ * EINVAL): the subtree would keep its own internal links but nothing would
+ * reference it from the root any more, so the whole thing silently detaches --
+ * fsck then reports every inode under it as an orphan, and reconnecting them
+ * leaves a directory cycle behind.  The walk is bounded, so a cycle that is
+ * ALREADY on disk cannot spin here; it just answers "yes" and the rename is
+ * refused, which is the safe direction. */
+static int
+is_ancestor(RW *h, uint32_t anc, uint32_t dino)
+{
+	uint32_t cur = dino, guard;
+
+	for (guard = 0; guard <= h->r.isize * h->r.inopb; guard++) {
+		fsr_inode in;
+		uint32_t up = 0;
+
+		if (cur == anc)
+			return 1;
+		if (cur == P11_ROOTINO || cur == 0)
+			return 0;
+		if (fsr_iget(&h->r, cur, &in) < 0)
+			return 0;
+		fsr_readdir(&h->r, &in, dotdot_cb, &up);
+		if (!up || up == cur)
+			return 0;
+		cur = up;
+	}
+	return 1; /* ran long: assume a cycle and refuse */
+}
+
 static void
 unref_inode(RW *h, uint32_t ino, int is_dir, uint32_t parent)
 {
@@ -490,19 +548,23 @@ rw_creat(RW *h, const char *path, unsigned perm, uint32_t *out_ino)
 {
 	char leaf[256];
 	uint32_t pino, cino;
+	int rc;
 	if (!h->writable)
 		return -EROFS;
 	pino = parent_of(h, path, leaf, sizeof leaf);
 	if (!pino)
 		return -ENOENT;
+	if (!name_ok(leaf)) /* check BEFORE allocating, so failure leaks nothing */
+		return -ENAMETOOLONG;
 	if (fsr_namei(&h->r, path))
 		return -EEXIST;
 	cino = ialloc_scan(h);
 	if (!cino)
 		return -ENOSPC;
 	write_new_inode(h, cino, (uint16_t)(P11_IFREG | (perm & 07777)), 0, 1, 0);
-	if (dir_add(h, pino, leaf, cino) < 0)
-		return -ENOSPC;
+	rc = dir_add(h, pino, leaf, cino);
+	if (rc < 0)
+		return rc;
 	if (out_ino)
 		*out_ino = cino;
 	rw_sync(h);
@@ -515,11 +577,14 @@ rw_mkdir(RW *h, const char *path, unsigned perm)
 	char leaf[256];
 	uint32_t pino, cino, dblk;
 	uint8_t db[P11_MAXBSIZE];
+	int rc;
 	if (!h->writable)
 		return -EROFS;
 	pino = parent_of(h, path, leaf, sizeof leaf);
 	if (!pino)
 		return -ENOENT;
+	if (!name_ok(leaf)) /* check BEFORE allocating, so failure leaks nothing */
+		return -ENAMETOOLONG;
 	if (fsr_namei(&h->r, path))
 		return -EEXIST;
 	cino = ialloc_scan(h);
@@ -534,8 +599,9 @@ rw_mkdir(RW *h, const char *path, unsigned perm)
 	db[P11_DIRENTSZ + 3] = '.';
 	s5fs_wtblk(&h->w, dblk, db);
 	write_new_inode(h, cino, (uint16_t)(P11_IFDIR | (perm & 07777)), dblk, 2, 2 * P11_DIRENTSZ);
-	if (dir_add(h, pino, leaf, cino) < 0)
-		return -ENOSPC;
+	rc = dir_add(h, pino, leaf, cino);
+	if (rc < 0)
+		return rc;
 	bump_nlink(h, pino, +1); /* the new dir's ".." */
 	rw_sync(h);
 	return 0;
@@ -623,7 +689,7 @@ rw_rename(RW *h, const char *from, const char *to)
 	char fleaf[256], tleaf[256];
 	uint32_t fpino, tpino, cino, tino;
 	fsr_inode cin;
-	int sdir;
+	int sdir, rc;
 
 	if (!h->writable)
 		return -EROFS;
@@ -636,9 +702,13 @@ rw_rename(RW *h, const char *from, const char *to)
 	tpino = parent_of(h, to, tleaf, sizeof tleaf);
 	if (!tpino)
 		return -ENOENT;
+	if (!name_ok(tleaf))
+		return -ENAMETOOLONG;
 	if (fsr_iget(&h->r, cino, &cin) < 0)
 		return -ENOENT;
 	sdir = (cin.mode & P11_IFMT) == P11_IFDIR;
+	if (sdir && is_ancestor(h, cino, tpino))
+		return -EINVAL; /* would detach the subtree from the root */
 
 	tino = fsr_namei(&h->r, to);
 	if (tino) {
@@ -660,8 +730,9 @@ rw_rename(RW *h, const char *from, const char *to)
 		dir_remove(h, tpino, tleaf);
 		unref_inode(h, tino, tdir, tpino);
 	}
-	if (dir_add(h, tpino, tleaf, cino) < 0)
-		return -ENOSPC;
+	rc = dir_add(h, tpino, tleaf, cino);
+	if (rc < 0)
+		return rc;
 	dir_remove(h, fpino, fleaf);
 	if (sdir && fpino != tpino) {
 		set_dotdot(h, cino, tpino);

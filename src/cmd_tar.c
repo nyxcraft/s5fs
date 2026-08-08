@@ -14,7 +14,7 @@
  * and decompressed to a temp file first (via gzip/bzip2 -- no build dependency,
  * just those tools at runtime), since the reader needs to seek.
  *
- * usage: s5fs tar [-B 512|1024] [-a pdp11|le|be]
+ * usage: s5fs tar [-B 512|1024|2048] [-a pdp11|le|be]
  *                 [-d device | -b blocks | -s sectors] [-t mtime]
  *                 archive[.gz|.bz2|.Z] image
  */
@@ -36,13 +36,13 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-static unsigned long g_reg, g_dir, g_dev, g_lnk, g_skip;
+static unsigned long g_reg, g_dir, g_dev, g_lnk, g_skip, g_skip_long;
 
 static void
 usage(void)
 {
 	fprintf(stderr,
-		"usage: s5fs tar [-B 512|1024] [-a pdp11|le|be]\n"
+		"usage: s5fs tar [-B 512|1024|2048] [-a pdp11|le|be]\n"
 		"                [-d device | -b blocks | -s sectors] [-t mtime]\n"
 		"                archive.tar image\n");
 	exit(2);
@@ -240,6 +240,20 @@ parse_tar(int fd, tnode *root)
 			snprintf(name, sizeof name, "%.100s", (char *)h);
 		}
 
+		/* tree_insert refuses a component longer than P11_DIRSIZ: the
+		 * name cannot be represented on disk, and truncating it would
+		 * collide with any sibling sharing its first 14 characters. */
+		if (type == '5' || type == '0' || type == '\0' || type == '7' ||
+		    type == '1' || type == '3' || type == '4') {
+			if (!tree_find(root, name) && !tree_insert(root, name)) {
+				fprintf(stderr, "s5fs tar: %s: name longer than %d characters (skipped)\n",
+					name, P11_DIRSIZ);
+				g_skip_long++;
+				pos = off + (size + 511) / 512 * 512;
+				continue;
+			}
+		}
+
 		switch (type) {
 		case '5': /* directory */
 			n = tree_insert(root, name);
@@ -358,8 +372,8 @@ tar_extract(int argc, char **argv)
 
 	if (opts.bsize == 0)
 		opts.bsize = 1024;
-	if (opts.bsize != 512 && opts.bsize != 1024) {
-		fprintf(stderr, "s5fs tar: block size must be 512 or 1024\n");
+	if (!P11_BSIZE_OK(opts.bsize)) {
+		fprintf(stderr, "s5fs tar: block size must be 512, 1024, or 2048\n");
 		return 2;
 	}
 	per = opts.bsize / 512;
@@ -466,8 +480,10 @@ tar_extract(int argc, char **argv)
 	printf("%s: %s, %lu %u-byte blocks; %lu files, %lu dirs, %lu dev nodes, "
 	       "%lu hard links; %d free blocks left\n",
 	       image, fs.bo->name, blocks, fs.bsize, g_reg, g_dir, g_dev, g_lnk, fs.s_tfree);
-	if (g_skip)
-		fprintf(stderr, "  skipped %lu unsupported entries (symlinks/fifos/etc.)\n", g_skip);
+	if (g_skip || g_skip_long)
+		fprintf(stderr, "  skipped %lu unsupported entries (symlinks/fifos/etc.), "
+				"%lu names over %d characters\n",
+			g_skip, g_skip_long, P11_DIRSIZ);
 	return 0;
 }
 
@@ -643,18 +659,22 @@ struct walkctx {
 	FSR *r;
 	int out;
 	const char *prefix;
+	fsr_walkset *ws; /* cycle guard: a looped image would recurse forever */
 };
 
 static void
-tar_walk(FSR *r, int out, uint32_t dirino, const char *prefix)
+tar_walk(FSR *r, int out, uint32_t dirino, const char *prefix, fsr_walkset *ws)
 {
 	fsr_inode in;
 	struct walkctx c;
+	if (!fsr_walk_enter(ws, dirino))
+		return; /* already visited: a directory cycle */
 	if (fsr_iget(r, dirino, &in) < 0)
 		return;
 	c.r = r;
 	c.out = out;
 	c.prefix = prefix;
+	c.ws = ws;
 	fsr_readdir(r, &in, walk_cb, &c);
 }
 
@@ -674,7 +694,7 @@ walk_cb(void *arg, uint32_t ino, const char *name)
 		return 0;
 	tar_emit(c->r, c->out, ino, path, &in);
 	if ((in.mode & P11_IFMT) == P11_IFDIR)
-		tar_walk(c->r, c->out, ino, path);
+		tar_walk(c->r, c->out, ino, path, c->ws);
 	return 0;
 }
 
@@ -713,12 +733,12 @@ tar_create(int argc, char **argv)
 			ospec = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: s5fs tar c [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] image archive\n");
+			fprintf(stderr, "usage: s5fs tar c [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] image archive\n");
 			return 2;
 		}
 	}
 	if (optind != argc - 2) {
-		fprintf(stderr, "usage: s5fs tar c [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] image archive\n");
+		fprintf(stderr, "usage: s5fs tar c [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] image archive\n");
 		return 2;
 	}
 	image = argv[optind];
@@ -737,7 +757,17 @@ tar_create(int argc, char **argv)
 		return 1;
 	}
 
-	tar_walk(&r, out, P11_ROOTINO, "");
+	{
+		fsr_walkset ws;
+		if (fsr_walkset_init(&ws, &r) < 0) {
+			fprintf(stderr, "s5fs tar c: out of memory\n");
+			close(out);
+			fsr_close(&r);
+			return 1;
+		}
+		tar_walk(&r, out, P11_ROOTINO, "", &ws);
+		fsr_walkset_free(&ws);
+	}
 	memset(zero, 0, sizeof zero);
 	wr(out, zero, sizeof zero); /* two zero blocks end the archive */
 	close(out);

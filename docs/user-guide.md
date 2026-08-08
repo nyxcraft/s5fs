@@ -237,7 +237,7 @@ stop over-promising.
 | filesystem | 2²⁴ blocks — 8 GiB @512, 16 GiB @1024, 32 GiB @2048 | block addresses are 3 bytes |
 | single file | 2 GiB | `di_size` is a signed 32-bit byte count |
 | inodes | ≈1M (≤ 65533 i-list blocks) | `s_isize` is a 16-bit field |
-| file name | 14 characters | the directory entry is 2 + 14 bytes |
+| file name | 14 characters | the directory entry is 2 + 14 bytes — a longer name is **refused**, not truncated |
 | block size | 512, 1024, 2048 | the family maximum is `Fs4b` |
 
 Out of scope by design: V6 and 2.11BSD, FFS/UFS, and dynamic or differencing

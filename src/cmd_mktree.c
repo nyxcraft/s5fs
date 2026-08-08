@@ -12,7 +12,7 @@
  * device/special files are skipped (a /dev spec pass comes later); hard links
  * are not coalesced (each becomes its own inode).  All are reported.
  *
- * usage: s5fs mktree [-B 512|1024] [-a pdp11|le|be]
+ * usage: s5fs mktree [-B 512|1024|2048] [-a pdp11|le|be]
  *                    [-d device | -b blocks | -s sectors] [-t mtime]
  *                    rootdir image
  */
@@ -34,7 +34,8 @@
 #include <sys/stat.h>
 
 /* run stats */
-static unsigned long g_files, g_dirs, g_devs, g_links, g_skip_link, g_skip_spec, g_skip_open;
+static unsigned long g_files, g_dirs, g_devs, g_links, g_skip_link, g_skip_spec, g_skip_open,
+	g_skip_long;
 
 /* hard-link table: host (dev,ino) -> the single s5fs inode we gave it.  Only
  * multiply-linked files are recorded, so it stays small. */
@@ -77,7 +78,7 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-		"usage: s5fs mktree [-B 512|1024] [-a pdp11|le|be]\n"
+		"usage: s5fs mktree [-B 512|1024|2048] [-a pdp11|le|be]\n"
 		"                   [-d device | -b blocks | -s sectors] [-t mtime]\n"
 		"                   [-D devspec] rootdir image\n"
 		"\n"
@@ -393,6 +394,17 @@ build_dir(S5FS *fs, const char *host, uint32_t ino, uint32_t parent,
 			g_skip_spec++;
 			continue;
 		}
+		/* A directory entry holds 14 name bytes and no terminator, so a
+		 * longer host name cannot be stored.  Skip it loudly: truncating
+		 * would silently collide with any sibling sharing its first 14
+		 * characters, producing two entries with the same on-disk name
+		 * that fsck still calls clean. */
+		if (strlen(de->d_name) > P11_DIRSIZ) {
+			fprintf(stderr, "s5fs mktree: %s: name longer than %d characters (skipped)\n",
+				child, P11_DIRSIZ);
+			g_skip_long++;
+			continue;
+		}
 		if (nk == cap) {
 			cap = cap ? cap * 2 : 16;
 			kids = realloc(kids, cap * sizeof *kids);
@@ -664,8 +676,9 @@ cmd_mktree(int argc, char **argv)
 	       "%lu hard links; %d free blocks left\n",
 	       image, fs.bo->name, blocks, fs.bsize, g_files, g_dirs, g_devs,
 	       g_links, fs.s_tfree);
-	if (g_skip_link || g_skip_spec || g_skip_open)
-		fprintf(stderr, "  skipped: %lu symlinks, %lu special files, %lu unreadable\n",
-			g_skip_link, g_skip_spec, g_skip_open);
+	if (g_skip_link || g_skip_spec || g_skip_open || g_skip_long)
+		fprintf(stderr, "  skipped: %lu symlinks, %lu special files, %lu unreadable, "
+				"%lu names over %d characters\n",
+			g_skip_link, g_skip_spec, g_skip_open, g_skip_long, P11_DIRSIZ);
 	return 0;
 }

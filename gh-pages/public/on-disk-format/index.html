@@ -515,6 +515,12 @@ files of any size can be stored.</li>
 <ul>
 <li><strong>Names are capped at 14 characters</strong> and a 14-character name has no
 terminator. Always copy into a 15-byte buffer and terminate by hand.</li>
+<li><strong>A longer name is refused, never truncated.</strong> The write path used to clamp
+to 14 bytes while <code>namei</code> still compared the full name, so the file was
+unreachable under the name the caller gave, and a second such name produced a
+<em>duplicate</em> on-disk entry on an image <code>fsck</code> still called clean. The <code>rw_*</code>
+ops now return <code>ENAMETOOLONG</code>; <code>mktree</code> and <code>tar x</code> skip the entry and report
+a count.</li>
 <li><strong>Deletion zeroes only the inode field.</strong> The name bytes stay. That is
 exactly what <code>scavenge</code> reads.</li>
 <li>Entry 0 is <code>.</code> and entry 1 is <code>..</code> by construction. The root's <code>..</code> points to

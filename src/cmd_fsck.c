@@ -14,7 +14,7 @@
  * the superblock (override with -A).  Block mapping and directory walking live
  * here too (they are the reader the FUSE mount will reuse); -l lists the tree.
  *
- * usage: s5fs fsck [-B 512|1024] [-A pdp11|le|be] [-l] image
+ * usage: s5fs fsck [-B 512|1024|2048] [-A pdp11|le|be] [-l] image
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -244,15 +244,21 @@ bmap(CK *c, const int32_t *addr, uint32_t lbn)
 	return phys;
 }
 
-/* ncheck-style recursive directory listing. */
+/* ncheck-style recursive directory listing.  `seen` is the cycle guard: a
+ * looped image (a corrupt one, or one this tool's own -p just reconnected)
+ * would otherwise recurse until the stack is exhausted.  Phase 3 already keeps
+ * a reached[] array for the same reason; this walker needs its own. */
 static void
-walk_dir(CK *c, uint32_t ino, const char *path)
+walk_dir(CK *c, uint32_t ino, const char *path, uint8_t *seen, uint32_t nino)
 {
 	uint16_t mode, nlink;
 	int32_t size, addr[P11_MAXNADDR];
 	uint32_t nblk, b;
 	uint8_t *buf;
 
+	if (ino == 0 || ino > nino || seen[ino])
+		return;
+	seen[ino] = 1;
 	if (read_inode(c, ino, &mode, &nlink, &size, addr) < 0)
 		return;
 	if ((mode & P11_IFMT) != P11_IFDIR)
@@ -272,6 +278,10 @@ walk_dir(CK *c, uint32_t ino, const char *path)
 			uint16_t di = c->bo->get16(d);
 			char name[P11_DIRSIZ + 1];
 			char child[1024];
+			/* stop at the directory's real size: the tail of the
+			 * last block is stale bytes, not entries */
+			if ((b * c->ndirect + e) * P11_DIRENTSZ >= (uint32_t)size)
+				break;
 			if (di == 0)
 				continue;
 			memcpy(name, d + 2, P11_DIRSIZ);
@@ -281,7 +291,7 @@ walk_dir(CK *c, uint32_t ino, const char *path)
 			snprintf(child, sizeof child, "%s%s%s",
 				 path, strcmp(path, "/") ? "/" : "", name);
 			printf("%5u %s\n", di, child);
-			walk_dir(c, di, child);
+			walk_dir(c, di, child, seen, nino);
 		}
 	}
 	free(buf);
@@ -851,7 +861,13 @@ fsck_run(const char *path, uint32_t bsize, s5_endian forced,
 	if (list) {
 		printf("--- tree from root (inode %u) ---\n", P11_ROOTINO);
 		printf("%5u /\n", P11_ROOTINO);
-		walk_dir(&c, P11_ROOTINO, "/");
+		{
+			uint8_t *seen = calloc((size_t)nino + 1, 1);
+			if (!seen)
+				die("out of memory");
+			walk_dir(&c, P11_ROOTINO, "/", seen, nino);
+			free(seen);
+		}
 	}
 
 	close(c.fd);
@@ -896,12 +912,12 @@ cmd_fsck(int argc, char **argv)
 			ospec = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: s5fs fsck [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] [-l] [-p] image\n");
+			fprintf(stderr, "usage: s5fs fsck [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] [-l] [-p] image\n");
 			return 2;
 		}
 	}
 	if (optind != argc - 1) {
-		fprintf(stderr, "usage: s5fs fsck [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] [-l] [-p] image\n");
+		fprintf(stderr, "usage: s5fs fsck [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] [-l] [-p] image\n");
 		return 2;
 	}
 	if (device_resolve_part(dev, part, ospec, &base, &plen) < 0)
@@ -941,12 +957,12 @@ cmd_icheck(int argc, char **argv) /* block/free-list check (-s salvages) */
 			ospec = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: s5fs icheck [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] [-s] image\n");
+			fprintf(stderr, "usage: s5fs icheck [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] [-s] image\n");
 			return 2;
 		}
 	}
 	if (optind != argc - 1) {
-		fprintf(stderr, "usage: s5fs icheck [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] [-s] image\n");
+		fprintf(stderr, "usage: s5fs icheck [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] [-s] image\n");
 		return 2;
 	}
 	if (device_resolve_part(dev, part, ospec, &base, &plen) < 0)
@@ -983,12 +999,12 @@ cmd_dcheck(int argc, char **argv) /* directory link-count check */
 			ospec = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: s5fs dcheck [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] image\n");
+			fprintf(stderr, "usage: s5fs dcheck [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] image\n");
 			return 2;
 		}
 	}
 	if (optind != argc - 1) {
-		fprintf(stderr, "usage: s5fs dcheck [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] image\n");
+		fprintf(stderr, "usage: s5fs dcheck [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] image\n");
 		return 2;
 	}
 	if (device_resolve_part(dev, part, ospec, &base, &plen) < 0)
@@ -1029,12 +1045,12 @@ cmd_clri(int argc, char **argv) /* clear (zero) an inode by number */
 			ospec = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: s5fs clri [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] image inode...\n");
+			fprintf(stderr, "usage: s5fs clri [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] image inode...\n");
 			return 2;
 		}
 	}
 	if (optind > argc - 2) {
-		fprintf(stderr, "usage: s5fs clri [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] image inode...\n");
+		fprintf(stderr, "usage: s5fs clri [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] image inode...\n");
 		return 2;
 	}
 	if (!P11_BSIZE_OK(bsize))

@@ -208,6 +208,12 @@ Consequences worth stating plainly:
 
 - **Names are capped at 14 characters** and a 14-character name has no
   terminator. Always copy into a 15-byte buffer and terminate by hand.
+- **A longer name is refused, never truncated.** The write path used to clamp
+  to 14 bytes while `namei` still compared the full name, so the file was
+  unreachable under the name the caller gave, and a second such name produced a
+  *duplicate* on-disk entry on an image `fsck` still called clean. The `rw_*`
+  ops now return `ENAMETOOLONG`; `mktree` and `tar x` skip the entry and report
+  a count.
 - **Deletion zeroes only the inode field.** The name bytes stay. That is
   exactly what `scavenge` reads.
 - Entry 0 is `.` and entry 1 is `..` by construction. The root's `..` points to

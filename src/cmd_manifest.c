@@ -84,6 +84,11 @@ typedef void (*ent_cb)(void *arg, const struct ent *e);
 
 static void walk(FSR *r, uint32_t ino, const char *path, ent_cb cb, void *arg);
 
+/* One-shot walk guard.  A directory cycle is representable on disk (a corrupt
+ * image, or fsck -p reconnecting an orphaned loop), and without this the
+ * recursion below runs until the stack is exhausted. */
+static fsr_walkset g_ws;
+
 struct wctx {
 	FSR *r;
 	const char *prefix;
@@ -102,7 +107,8 @@ walk_cb(void *a, uint32_t ino, const char *name)
 		snprintf(child, sizeof child, "/%s", name);
 	else
 		snprintf(child, sizeof child, "%s/%s", w->prefix, name);
-	walk(w->r, ino, child, w->cb, w->arg);
+	if (fsr_walk_enter(&g_ws, ino))
+		walk(w->r, ino, child, w->cb, w->arg);
 	return 0;
 }
 
@@ -217,7 +223,13 @@ cmd_manifest(int argc, char **argv)
 	if (idx < 0)
 		return 2;
 	printf("# s5fs manifest: %s\n", argv[idx]);
+	if (fsr_walkset_init(&g_ws, &r) < 0) {
+		fprintf(stderr, "s5fs: out of memory\n");
+		fsr_close(&r);
+		return 1;
+	}
 	walk(&r, P11_ROOTINO, "/", print_cb, stdout);
+	fsr_walkset_free(&g_ws);
 	fsr_close(&r);
 	return 0;
 }
@@ -357,7 +369,13 @@ cmd_verify(int argc, char **argv)
 	}
 	fclose(mf);
 
+	if (fsr_walkset_init(&g_ws, &r) < 0) {
+		fprintf(stderr, "s5fs: out of memory\n");
+		fsr_close(&r);
+		return 1;
+	}
 	walk(&r, P11_ROOTINO, "/", verify_cb, &v);
+	fsr_walkset_free(&g_ws);
 	fsr_close(&r);
 
 	for (i = 0; i < v.n; i++)

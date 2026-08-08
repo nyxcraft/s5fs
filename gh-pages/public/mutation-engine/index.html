@@ -38,9 +38,10 @@
 <li><a class="section-nav__link section-nav__link--l2" href="#2-consistency-after-every-operation">2. Consistency after every operation</a></li>
 <li><a class="section-nav__link section-nav__link--l2" href="#3-the-block-map">3. The block map</a></li>
 <li><a class="section-nav__link section-nav__link--l2" href="#4-the-operations">4. The operations</a></li>
-<li><a class="section-nav__link section-nav__link--l2" href="#5-deletion-precisely">5. Deletion, precisely</a></li>
-<li><a class="section-nav__link section-nav__link--l2" href="#6-extending-it">6. Extending it</a></li>
-<li><a class="section-nav__link section-nav__link--l2" href="#7-for-a-maintainer">7. For a maintainer</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#5-two-refusals-worth-knowing">5. Two refusals worth knowing</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#6-deletion-precisely">6. Deletion, precisely</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#7-extending-it">7. Extending it</a></li>
+<li><a class="section-nav__link section-nav__link--l2" href="#8-for-a-maintainer">8. For a maintainer</a></li>
 </ul>
         </nav>
       </aside>
@@ -161,7 +162,7 @@ front-end can <code>strerror(-rc)</code> it.</p>
 </tr>
 <tr>
 <td><code>rw_rename(from, to)</code></td>
-<td>within one image</td>
+<td>within one image; <strong><code>EINVAL</code></strong> if <code>to</code> is inside <code>from</code> (§5)</td>
 </tr>
 <tr>
 <td><code>rw_creat(path, perm, &amp;ino)</code></td>
@@ -200,7 +201,17 @@ rather than requiring a host temporary file.</p>
 honor invariant #6 — preserve times rather than stamping them. A caller that
 knows the original time must pass it.</p>
 <hr />
-<h2 id="5-deletion-precisely">5. Deletion, precisely</h2>
+<h2 id="5-two-refusals-worth-knowing">5. Two refusals worth knowing</h2>
+<p><strong>A name longer than 14 bytes is refused, not truncated</strong> (<code>ENAMETOOLONG</code>), and
+checked <em>before</em> anything is allocated so a failure leaks no inode. The format
+cannot represent the name; truncating produced two entries with the same
+on-disk name, both unreachable under the caller's name.</p>
+<p><strong>A directory cannot be renamed into its own subtree</strong> (<code>EINVAL</code>, as POSIX
+requires). <code>is_ancestor</code> walks <code>..</code> from the destination to the root. Without
+it the subtree kept its internal links but lost every reference from the root —
+one successful-looking <code>mv</code> silently detached it, and <code>fsck -p</code> reconnecting the
+result left a directory cycle behind.</p>
+<h2 id="6-deletion-precisely">6. Deletion, precisely</h2>
 <p>Worth spelling out because two subsystems depend on the details:</p>
 <ol>
 <li>The directory entry's <strong>2-byte inode field is zeroed</strong>. The 14 name bytes
@@ -213,7 +224,7 @@ fifty</strong>. See <a href="../allocator/index.html"><code>allocator.md</code><
 </ol>
 <p>Step 1 is why deleted names survive. Step 3 is why deleted <em>files</em> do not.</p>
 <hr />
-<h2 id="6-extending-it">6. Extending it</h2>
+<h2 id="7-extending-it">7. Extending it</h2>
 <p>New file operation:</p>
 <ol>
 <li>Implement <code>rw_&lt;op&gt;</code> in <code>s5fs_rw.c</code>, ending in <code>rw_sync</code>.</li>
@@ -226,7 +237,7 @@ fifty</strong>. See <a href="../allocator/index.html"><code>allocator.md</code><
 arithmetic, the primitive already exists — <code>rw_bmap</code>, <code>rw_ino_loc</code>,
 <code>s5fs_alloc</code>, <code>s5fs_setblocks</code>.</p>
 <hr />
-<h2 id="7-for-a-maintainer">7. For a maintainer</h2>
+<h2 id="8-for-a-maintainer">8. For a maintainer</h2>
 <ul>
 <li><strong>Two fds, page-cache coherent.</strong> Don't &quot;optimize&quot; this into one fd, and
 don't add a flush-and-reopen; the coherence is what the design rests on.</li>
@@ -240,6 +251,8 @@ through.</li>
 the <code>@</code> escape is resolved by the front-end.</li>
 <li><strong>Preserve times.</strong> If a caller knows the original mtime, it must pass it;
 defaulting to &quot;now&quot; is the regression that keeps trying to come back.</li>
+<li><strong>Check the name before allocating.</strong> <code>name_ok()</code> runs ahead of <code>ialloc_scan</code>
+in every op that creates an entry, so a refused name costs nothing.</li>
 </ul>
 
         </div>

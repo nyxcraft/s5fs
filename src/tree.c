@@ -83,6 +83,13 @@ walk(tnode *root, const char *path, int create)
 			cur = cur->parent;
 			continue;
 		}
+		/* A directory entry holds P11_DIRSIZ name bytes with no
+		 * terminator.  Refuse rather than truncate: two siblings sharing
+		 * their first 14 characters would otherwise become two entries
+		 * with the SAME on-disk name, both unreachable under the name the
+		 * archive used, on an image fsck still calls clean. */
+		if (strlen(tok) > P11_DIRSIZ)
+			return NULL;
 		child = dir_child(cur, tok);
 		if (!child) {
 			if (!create)
@@ -218,14 +225,18 @@ write_dir(S5FS *fs, tnode *n, s5fs_inode *in)
 		if (!t)
 			continue; /* dangling hard link */
 		l = strlen(c->name);
-		if (l > P11_DIRSIZ)
-			l = P11_DIRSIZ;
+		if (l > P11_DIRSIZ) /* tree_insert refuses these; belt and braces */
+			continue;
 		fs->bo->put16(e, (uint16_t)t->ino);
 		memcpy((char *)e + 2, c->name, l);
 	}
 	/* store the directory data as this inode's content */
 	nblk = (len + fs->bsize - 1) / fs->bsize;
 	da = nblk ? malloc(nblk * sizeof *da) : NULL;
+	if (nblk && !da) { /* write_reg checks this; so must we */
+		free(db);
+		return;
+	}
 	for (b = 0; b < nblk; b++) {
 		da[b] = s5fs_alloc(fs);
 		s5fs_wtblk(fs, (uint32_t)da[b], db + b * fs->bsize);

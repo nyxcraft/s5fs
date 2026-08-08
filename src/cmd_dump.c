@@ -11,7 +11,7 @@
  * The dump inherits the image's byte order (a PDP-11 image -> a PDP-11 dump),
  * so `s5fs restore` round-trips it and the metadata/data copy through verbatim.
  *
- * usage: s5fs dump [-B 512|1024] [-A pdp11|le|be] image dumpfile
+ * usage: s5fs dump [-B 512|1024|2048] [-A pdp11|le|be] image dumpfile
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -252,12 +252,12 @@ cmd_dump(int argc, char **argv)
 			TAP = 1;
 			break;
 		default:
-			fprintf(stderr, "usage: s5fs dump [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] [-T] image dumpfile\n");
+			fprintf(stderr, "usage: s5fs dump [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] [-T] image dumpfile\n");
 			return 2;
 		}
 	}
 	if (optind != argc - 2) {
-		fprintf(stderr, "usage: s5fs dump [-B 512|1024] [-A pdp11|le|be] [-d dev -P part | -o blk] image dumpfile\n");
+		fprintf(stderr, "usage: s5fs dump [-B 512|1024|2048] [-A pdp11|le|be] [-d dev -P part | -o blk] image dumpfile\n");
 		return 2;
 	}
 	image = argv[optind];

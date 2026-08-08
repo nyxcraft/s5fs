@@ -60,6 +60,7 @@ static const struct subcmd {
 	{ "mount",   cmd_mount,   "FUSE-mount an image read-only (make FUSE=1)" },
 	{ "umount",  cmd_umount,  "unmount a FUSE mount"                     },
 };
+
 /* clang-format on */
 
 #define NSUB ((int)(sizeof subcmds / sizeof subcmds[0]))

@@ -108,6 +108,11 @@ wanted_inode(const char *list, uint32_t ino)
 	return 0;
 }
 
+/* One-shot walk guard.  A directory cycle is representable on disk (a corrupt
+ * image, or fsck -p reconnecting an orphaned loop), and without this the
+ * recursion below runs until the stack is exhausted. */
+static fsr_walkset g_ws;
+
 static void
 ncheck_walk(struct nctx *c, uint32_t ino, const char *path)
 {
@@ -146,7 +151,8 @@ ncheck_walk(struct nctx *c, uint32_t ino, const char *path)
 			if (!strcmp(nm, ".") || !strcmp(nm, ".."))
 				continue;
 			snprintf(child, sizeof child, "%s%s%s", path, strcmp(path, "/") ? "/" : "", nm);
-			ncheck_walk(c, di, child);
+			if (fsr_walk_enter(&g_ws, di))
+				ncheck_walk(c, di, child);
 		}
 	}
 }
@@ -171,7 +177,13 @@ cmd_ncheck(int argc, char **argv)
 	c.r = &r;
 	if (c.sflag)
 		printf("setuid / setgid / device files:\n");
+	if (fsr_walkset_init(&g_ws, &r) < 0) {
+		fprintf(stderr, "ncheck: out of memory\n");
+		fsr_close(&r);
+		return 1;
+	}
 	ncheck_walk(&c, P11_ROOTINO, "/");
+	fsr_walkset_free(&g_ws);
 	fsr_close(&r);
 	return 0;
 }
@@ -278,7 +290,8 @@ du_walk(FSR *r, uint32_t ino, const char *path)
 			if (!strcmp(nm, ".") || !strcmp(nm, ".."))
 				continue;
 			snprintf(child, sizeof child, "%s%s%s", path, strcmp(path, "/") ? "/" : "", nm);
-			total += du_walk(r, di, child);
+			if (fsr_walk_enter(&g_ws, di))
+				total += du_walk(r, di, child);
 		}
 	}
 	printf("%8ld  %s\n", total, path); /* du prints dirs, post-order */
@@ -308,7 +321,13 @@ cmd_du(int argc, char **argv)
 		fsr_close(&r);
 		return 1;
 	}
+	if (fsr_walkset_init(&g_ws, &r) < 0) {
+		fprintf(stderr, "du: out of memory\n");
+		fsr_close(&r);
+		return 1;
+	}
 	du_walk(&r, ino, path);
+	fsr_walkset_free(&g_ws);
 	fsr_close(&r);
 	return 0;
 }

@@ -171,6 +171,73 @@ if "$S5" cat "$T/mb.dsk" /y 2>/dev/null | cmp -s - "$T/src" && fsck_clean "$T/ma
 	ok "shell multi-mount cross-image cp"
 else no "shell multi-mount cross-image cp"; fi
 
+# 12. name longer than 14 chars is REFUSED, not silently truncated.  Truncating
+#     produced two entries with the same on-disk name, both unreachable under
+#     the name the caller gave, on an image fsck still called clean.
+"$S5" mkfs -d rl02 "$T/nm.dsk" >/dev/null 2>&1
+"$S5" put "$T/nm.dsk" "$T/src" /averylongfilename_AAA >/dev/null 2>&1; long1=$?
+"$S5" put "$T/nm.dsk" "$T/src" /averylongfilename_BBB >/dev/null 2>&1
+"$S5" put "$T/nm.dsk" "$T/src" /exactly14char >/dev/null 2>&1; short=$?
+ndup=$("$S5" ls "$T/nm.dsk" / 2>/dev/null | sort | uniq -d | wc -l)
+if [ "$long1" -ne 0 ] && [ "$short" -eq 0 ] && [ "$ndup" -eq 0 ] && fsck_clean "$T/nm.dsk"; then
+	ok "over-long name refused (no duplicate entries)"
+else no "over-long name refused (long=$long1 short=$short dups=$ndup)"; fi
+
+# 12b. mktree / tar x skip an unrepresentable name loudly instead of truncating
+# two names sharing their first 14 characters: truncation makes them collide
+mkdir -p "$T/lt" && : > "$T/lt/short.c"
+: > "$T/lt/this_is_a_long_name_one.c" && : > "$T/lt/this_is_a_long_name_two.c"
+"$S5" mktree -d rl02 "$T/lt" "$T/lt.dsk" >/dev/null 2>&1
+ltn=$("$S5" ls "$T/lt.dsk" / 2>/dev/null | sort | uniq -d | wc -l)
+lts=$("$S5" ls "$T/lt.dsk" / 2>/dev/null | grep -c '^short.c$')
+if [ "$ltn" -eq 0 ] && [ "$lts" -eq 1 ] && fsck_clean "$T/lt.dsk"; then
+	ok "mktree skips over-long names (no duplicates)"
+else no "mktree skips over-long names (dups=$ltn short=$lts)"; fi
+
+# 13. renaming a directory into its own subtree is refused (POSIX EINVAL).
+#     It used to succeed and silently detach the whole subtree from the root.
+"$S5" mkfs -d rl02 "$T/mv.dsk" >/dev/null 2>&1
+"$S5" mkdir "$T/mv.dsk" /a >/dev/null 2>&1
+"$S5" mkdir "$T/mv.dsk" /a/b >/dev/null 2>&1
+"$S5" mv "$T/mv.dsk" /a /a/b/c >/dev/null 2>&1; mvrc=$?
+still=$("$S5" ls "$T/mv.dsk" / 2>/dev/null | grep -c '^a$')
+if [ "$mvrc" -ne 0 ] && [ "$still" -eq 1 ] && fsck_clean "$T/mv.dsk"; then
+	ok "rename into own subtree refused"
+else no "rename into own subtree refused (rc=$mvrc still=$still)"; fi
+
+# 14. a directory CYCLE must not crash the recursive walkers.  Build a real one
+#     with fsdb: point /p/q/loop's directory entry back at /p.  Before the fix
+#     this segfaulted du, ncheck, manifest, fsck -l and tar c (stack exhausted).
+"$S5" mkfs -d rl02 "$T/cy.dsk" >/dev/null 2>&1
+"$S5" mkdir "$T/cy.dsk" /p >/dev/null 2>&1
+"$S5" mkdir "$T/cy.dsk" /p/q >/dev/null 2>&1
+"$S5" cp "$T/cy.dsk" @"$T/src" /p/q/loop >/dev/null 2>&1
+cyp=$(printf 'path /p\nquit\n'   | "$S5" fsdb "$T/cy.dsk" 2>/dev/null | grep -oE 'inode [0-9]+' | awk '{print $2}')
+cyq=$(printf 'path /p/q\nquit\n' | "$S5" fsdb "$T/cy.dsk" 2>/dev/null | grep -oE 'inode [0-9]+' | awk '{print $2}')
+cyb=$(printf 'map %s\nquit\n' "$cyq" | "$S5" fsdb "$T/cy.dsk" 2>/dev/null | awk '/-> /{print $3; exit}')
+if [ -n "$cyp" ] && [ -n "$cyb" ]; then
+	cylo=$(printf '%02x' $((cyp & 255))); cyhi=$(printf '%02x' $((cyp / 256)))
+	printf 'poke %s 32 %s %s\nquit\n' "$cyb" "$cylo" "$cyhi" | "$S5" fsdb -w "$T/cy.dsk" >/dev/null 2>&1
+	cyloop=$(printf 'dir %s\nquit\n' "$cyq" | "$S5" fsdb "$T/cy.dsk" 2>/dev/null | grep -c "  *2  *$cyp  *loop")
+	cycrash=0
+	for cmd in du ncheck manifest quot; do
+		timeout 20 "$S5" $cmd "$T/cy.dsk" >/dev/null 2>&1
+		[ $? -gt 128 ] && cycrash=$((cycrash + 1))
+	done
+	timeout 20 "$S5" tar c "$T/cy.dsk" "$T/cy.tar" >/dev/null 2>&1
+	[ $? -gt 128 ] && cycrash=$((cycrash + 1))
+	timeout 20 "$S5" fsck -l "$T/cy.dsk" >/dev/null 2>&1
+	[ $? -gt 128 ] && cycrash=$((cycrash + 1))
+	if [ "$cyloop" -eq 1 ] && [ "$cycrash" -eq 0 ]; then
+		ok "directory cycle does not crash the walkers"
+	else no "directory cycle (built=$cyloop crashed=$cycrash)"; fi
+else no "directory cycle (could not build the fixture)"; fi
+
+# 15. tar x honours 2048-byte blocks (it was the one command hardcoding 512/1024)
+"$S5" tar c "$T/a.dsk" "$T/b2.tar" >/dev/null 2>&1
+"$S5" tar x -B 2048 -d rp06 "$T/b2.tar" "$T/b2.dsk" >/dev/null 2>&1
+if fsck_clean -B 2048 "$T/b2.dsk"; then ok "tar x -B 2048"; else no "tar x -B 2048"; fi
+
 echo "------------------------------------------------------------"
 echo "PASS $pass   FAIL $fail"
 [ "$fail" -eq 0 ]

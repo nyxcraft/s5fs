@@ -269,3 +269,36 @@ fsr_readfile(FSR *r, const fsr_inode *in, void *vbuf, long size, long off)
 	}
 	return done;
 }
+
+/* ------------------------------------------------------------------ *
+ * visited set for recursive directory walks (see fsread.h)
+ * ------------------------------------------------------------------ */
+
+int
+fsr_walkset_init(fsr_walkset *w, const FSR *r)
+{
+	/* inode numbers run 1 .. (isize-2)*inopb; index the array by number, so
+	 * allocate one extra and leave [0] unused. */
+	w->n = (r->isize > P11_ILISTSTART) ? (r->isize - P11_ILISTSTART) * r->inopb : 0;
+	w->seen = calloc((size_t)w->n + 1, 1);
+	return w->seen ? 0 : -1;
+}
+
+void
+fsr_walkset_free(fsr_walkset *w)
+{
+	free(w->seen);
+	w->seen = NULL;
+	w->n = 0;
+}
+
+int
+fsr_walk_enter(fsr_walkset *w, uint32_t ino)
+{
+	if (!w->seen || ino == 0 || ino > w->n)
+		return 0; /* out of range: a garbage entry, do not follow it */
+	if (w->seen[ino])
+		return 0; /* already entered: a cycle */
+	w->seen[ino] = 1;
+	return 1;
+}

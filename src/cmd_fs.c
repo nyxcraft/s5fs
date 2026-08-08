@@ -288,7 +288,7 @@ fs_open(int argc, char **argv, RW *h, int writable, const char *extra)
 	}
 	return optind + 1;
 usage:
-	fprintf(stderr, "usage: s5fs %s [-B 512|1024] [-A pdp11|le|be] "
+	fprintf(stderr, "usage: s5fs %s [-B 512|1024|2048] [-A pdp11|le|be] "
 			"[-d dev -P part | -o blk] image %s\n",
 		argv[0], extra);
 	return -1;

@@ -123,7 +123,7 @@ front-end can `strerror(-rc)` it.
 | `rw_mkdir(path, perm)` | creates `.` and `..`, bumps the parent's link count |
 | `rw_rmdir(path)` | refuses a non-empty directory |
 | `rw_unlink(path)` | zeroes the directory slot's inode field; frees blocks at link 0 |
-| `rw_rename(from, to)` | within one image |
+| `rw_rename(from, to)` | within one image; **`EINVAL`** if `to` is inside `from` (§5) |
 | `rw_creat(path, perm, &ino)` | returns the new inode number |
 | `rw_chmod` / `rw_chown` / `rw_utimes` | metadata only |
 | `rw_pwrite(ino, buf, size, off)` | allocating random write |
@@ -142,7 +142,20 @@ knows the original time must pass it.
 
 ---
 
-## 5. Deletion, precisely
+## 5. Two refusals worth knowing
+
+**A name longer than 14 bytes is refused, not truncated** (`ENAMETOOLONG`), and
+checked *before* anything is allocated so a failure leaks no inode. The format
+cannot represent the name; truncating produced two entries with the same
+on-disk name, both unreachable under the caller's name.
+
+**A directory cannot be renamed into its own subtree** (`EINVAL`, as POSIX
+requires). `is_ancestor` walks `..` from the destination to the root. Without
+it the subtree kept its internal links but lost every reference from the root —
+one successful-looking `mv` silently detached it, and `fsck -p` reconnecting the
+result left a directory cycle behind.
+
+## 6. Deletion, precisely
 
 Worth spelling out because two subsystems depend on the details:
 
@@ -158,7 +171,7 @@ Step 1 is why deleted names survive. Step 3 is why deleted *files* do not.
 
 ---
 
-## 6. Extending it
+## 7. Extending it
 
 New file operation:
 
@@ -174,7 +187,7 @@ arithmetic, the primitive already exists — `rw_bmap`, `rw_ino_loc`,
 
 ---
 
-## 7. For a maintainer
+## 8. For a maintainer
 
 - **Two fds, page-cache coherent.** Don't "optimize" this into one fd, and
   don't add a flush-and-reopen; the coherence is what the design rests on.
@@ -188,3 +201,5 @@ arithmetic, the primitive already exists — `rw_bmap`, `rw_ino_loc`,
   the `@` escape is resolved by the front-end.
 - **Preserve times.** If a caller knows the original mtime, it must pass it;
   defaulting to "now" is the regression that keeps trying to come back.
+- **Check the name before allocating.** `name_ok()` runs ahead of `ialloc_scan`
+  in every op that creates an entry, so a refused name costs nothing.

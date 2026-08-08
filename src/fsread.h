@@ -51,4 +51,27 @@ long fsr_readfile(FSR *r, const fsr_inode *in, void *buf, long size, long off);
 /* Read a raw filesystem block by number into buf (bsize bytes). 0 ok, -1. */
 int fsr_bread(FSR *r, uint32_t bno, uint8_t *buf);
 
+/* A visited set for recursive directory walks.
+ *
+ * A directory cycle is unreachable through this tool's own operations but is
+ * perfectly representable on disk, so it arrives from a corrupt image, a
+ * hostile one, or from `fsck -p` reconnecting an orphaned loop into
+ * /lost+found.  Without a visited set every recursive walker follows the cycle
+ * until the stack is exhausted -- and `scavenge`/`fsck` exist to be pointed at
+ * exactly the damaged images that carry one.  Enter each directory through
+ * fsr_walk_enter() and skip it when that returns 0. */
+typedef struct {
+	uint8_t *seen; /* one byte per inode, indexed by inode number  */
+	uint32_t n;    /* highest inode number the set covers          */
+} fsr_walkset;
+
+/* Size the set from the image's i-list. 0 ok, -1 on allocation failure. */
+int fsr_walkset_init(fsr_walkset *w, const FSR *r);
+void fsr_walkset_free(fsr_walkset *w);
+
+/* Claim `ino`: 1 on the first visit, 0 if it has been entered before (a cycle,
+ * or a directory reachable two ways).  An out-of-range inode returns 0, so a
+ * garbage directory entry is skipped rather than followed. */
+int fsr_walk_enter(fsr_walkset *w, uint32_t ino);
+
 #endif /* FSREAD_H */

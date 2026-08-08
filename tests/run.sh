@@ -19,6 +19,32 @@ ok() { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 no() { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; }
 fsck_clean() { [ "$("$S5" fsck "$@" 2>/dev/null | tail -1)" = clean ]; }
 
+# Run a command under a time limit; returns 124 if it had to be killed.
+# macOS has no timeout(1), and a bare `timeout ...` there exits 127 -- which is
+# neither 124 nor a crash, so every hang/crash check silently passed instead of
+# running.  Prefer the real thing, fall back to a poll-and-kill.
+if command -v timeout >/dev/null 2>&1; then
+	tmo() { _s=$1; shift; timeout "$_s" "$@"; }
+elif command -v gtimeout >/dev/null 2>&1; then
+	tmo() { _s=$1; shift; gtimeout "$_s" "$@"; }
+else
+	tmo() {
+		_s=$1; shift
+		"$@" & _p=$!
+		_i=0
+		while kill -0 "$_p" 2>/dev/null; do
+			[ "$_i" -ge "$_s" ] && {
+				kill -9 "$_p" 2>/dev/null
+				wait "$_p" 2>/dev/null
+				return 124
+			}
+			_i=$((_i + 1))
+			sleep 1
+		done
+		wait "$_p"
+	}
+fi
+
 echo "s5fs regression tests ($S5)"
 
 # 1. mkfs + fsck
@@ -221,12 +247,12 @@ if [ -n "$cyp" ] && [ -n "$cyb" ]; then
 	cyloop=$(printf 'dir %s\nquit\n' "$cyq" | "$S5" fsdb "$T/cy.dsk" 2>/dev/null | grep -c "  *2  *$cyp  *loop")
 	cycrash=0
 	for cmd in du ncheck manifest quot; do
-		timeout 20 "$S5" $cmd "$T/cy.dsk" >/dev/null 2>&1
+		tmo 20 "$S5" $cmd "$T/cy.dsk" >/dev/null 2>&1
 		[ $? -gt 128 ] && cycrash=$((cycrash + 1))
 	done
-	timeout 20 "$S5" tar c "$T/cy.dsk" "$T/cy.tar" >/dev/null 2>&1
+	tmo 20 "$S5" tar c "$T/cy.dsk" "$T/cy.tar" >/dev/null 2>&1
 	[ $? -gt 128 ] && cycrash=$((cycrash + 1))
-	timeout 20 "$S5" fsck -l "$T/cy.dsk" >/dev/null 2>&1
+	tmo 20 "$S5" fsck -l "$T/cy.dsk" >/dev/null 2>&1
 	[ $? -gt 128 ] && cycrash=$((cycrash + 1))
 	if [ "$cyloop" -eq 1 ] && [ "$cycrash" -eq 0 ]; then
 		ok "directory cycle does not crash the walkers"
@@ -297,11 +323,11 @@ if [ -n "$flb" ] && [ "$flb" -gt 0 ]; then
 		"$S5" fsdb -w "$T/fl.dsk" >/dev/null 2>&1
 	flhang=0
 	for cmd in scavenge df icheck fsck; do
-		timeout 20 "$S5" $cmd "$T/fl.dsk" >/dev/null 2>&1
+		tmo 20 "$S5" $cmd "$T/fl.dsk" >/dev/null 2>&1
 		[ $? -eq 124 ] && flhang=$((flhang + 1))
 	done
-	flsaw=$(timeout 20 "$S5" fsck "$T/fl.dsk" 2>&1 | grep -c 'free list loops')
-	timeout 20 "$S5" fsck -p "$T/fl.dsk" >/dev/null 2>&1     # must be able to repair it
+	flsaw=$(tmo 20 "$S5" fsck "$T/fl.dsk" 2>&1 | grep -c 'free list loops')
+	tmo 20 "$S5" fsck -p "$T/fl.dsk" >/dev/null 2>&1     # must be able to repair it
 	if [ "$flhang" -eq 0 ] && [ "$flsaw" -ge 1 ] && fsck_clean "$T/fl.dsk"; then
 		ok "looping free list is diagnosed and repaired"
 	else no "looping free list (hung=$flhang diagnosed=$flsaw)"; fi

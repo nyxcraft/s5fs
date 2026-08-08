@@ -33,8 +33,9 @@
  * cylinder offsets pre-multiplied by that driver's blocks-per-cylinder so the
  * numbers here are absolute 512-byte-block (start, length) windows.  Overlap is
  * intentional: a/b/c tile the platter, g/h alias the whole drive. */
-#define NP(a) ((int)(sizeof (a) / sizeof (a)[0]))
+#define NP(a) ((int)(sizeof(a) / sizeof(a)[0]))
 
+/* clang-format off */	/* disk + partition tables: columns are the geometry */
 static const disk_part hk_parts[] = {		/* RK06/RK07, 66 blk/cyl */
 	{'a',     0,  5940}, {'b',  5940,  2376}, {'c',  8316, 45474},
 	{'d',  8316, 18810}, {'g',     0, 27126}, {'h',     0, 53790},
@@ -93,25 +94,28 @@ static const disk_dev builtin[] = {
 	{ "ra90", "RA90 disk (MSCP)",                         2376153, REL_210, REL_210, NULL, 0 },
 	{ "ra92", "RA92 disk (MSCP)",                         2940951, REL_210, REL_210, NULL, 0 },
 };
+/* clang-format on */
 #define NBUILTIN ((int)(sizeof builtin / sizeof builtin[0]))
 
 /* runtime table = built-ins, then user file merged on top */
 static disk_dev *table;
-static int       ntable;
-static int       nuser;			/* how many entries came from a file */
-static char      srcpath[512];		/* the user file we loaded, if any */
-static int       loaded;
+static int ntable;
+static int nuser;	  /* how many entries came from a file */
+static char srcpath[512]; /* the user file we loaded, if any */
+static int loaded;
 
-static const char *const relnames[] = { "v7", "2.8", "2.9", "2.10" };
+static const char *const relnames[] = {"v7", "2.8", "2.9", "2.10"};
 
-const char *release_name(bsd_rel r)
+const char *
+release_name(bsd_rel r)
 {
 	if (r < REL_V7 || r > REL_210)
 		return "?";
 	return relnames[r];
 }
 
-bsd_rel release_parse(const char *s)
+bsd_rel
+release_parse(const char *s)
 {
 	if (!s)
 		return REL_NONE;
@@ -128,43 +132,55 @@ bsd_rel release_parse(const char *s)
 
 /* ---- INI loading -------------------------------------------------- */
 
-static char *trim(char *s)
+static char *
+trim(char *s)
 {
 	char *e;
-	while (*s && isspace((unsigned char)*s)) s++;
+	while (*s && isspace((unsigned char)*s))
+		s++;
 	e = s + strlen(s);
-	while (e > s && isspace((unsigned char)e[-1])) *--e = '\0';
+	while (e > s && isspace((unsigned char)e[-1]))
+		*--e = '\0';
 	return s;
 }
 
 /* add `d` to the runtime table: override an existing entry by name, else append */
-static void merge(const disk_dev *d)
+static void
+merge(const disk_dev *d)
 {
 	int i;
 	for (i = 0; i < ntable; i++)
-		if (!strcasecmp(table[i].name, d->name)) { table[i] = *d; return; }
+		if (!strcasecmp(table[i].name, d->name)) {
+			table[i] = *d;
+			return;
+		}
 	table = realloc(table, (size_t)(ntable + 1) * sizeof *table);
-	if (!table) { perror("s5fs: realloc"); exit(1); }
+	if (!table) {
+		perror("s5fs: realloc");
+		exit(1);
+	}
 	table[ntable++] = *d;
 }
 
-static void commit(disk_dev *cur, int *have)
+static void
+commit(disk_dev *cur, int *have)
 {
 	if (!*have)
 		return;
 	*have = 0;
 	if (cur->blocks == 0) {
 		fprintf(stderr, "s5fs: device '%s' in spec has no 'blocks' -- ignored\n",
-		        cur->name ? cur->name : "?");
+			cur->name ? cur->name : "?");
 		return;
 	}
 	if (!cur->desc)
 		cur->desc = "(user-defined)";
 	merge(cur);
-	nuser++;			/* counts overrides and additions alike */
+	nuser++; /* counts overrides and additions alike */
 }
 
-static void load_user(const char *path)
+static void
+load_user(const char *path)
 {
 	FILE *f = fopen(path, "r");
 	char line[512];
@@ -179,50 +195,68 @@ static void load_user(const char *path)
 	while (fgets(line, sizeof line, f)) {
 		char *p = trim(line);
 		if (*p == '\0' || *p == '#' || *p == ';')
-			continue;			/* blank / full-line comment */
-		if (*p == '[') {			/* [devname] */
+			continue; /* blank / full-line comment */
+		if (*p == '[') {  /* [devname] */
 			char *end = strchr(p, ']');
-			if (!end) continue;
+			if (!end)
+				continue;
 			*end = '\0';
 			commit(&cur, &have);
 			memset(&cur, 0, sizeof cur);
-			cur.name  = strdup(trim(p + 1));
-			cur.since = REL_V7;		/* default: never warns */
+			cur.name = strdup(trim(p + 1));
+			cur.since = REL_V7; /* default: never warns */
 			cur.until = REL_210;
 			have = 1;
-		} else {				/* key = value */
+		}
+		else { /* key = value */
 			char *eq = strchr(p, '=');
 			char *key, *val, *sp;
 			bsd_rel r;
-			if (!eq || !have) continue;
+			if (!eq || !have)
+				continue;
 			*eq = '\0';
 			key = trim(p);
 			val = trim(eq + 1);
 			if (!strcasecmp(key, "blocks")) {
 				cur.blocks = (uint32_t)strtoul(val, NULL, 0);
-			} else if (!strcasecmp(key, "desc")) {
+			}
+			else if (!strcasecmp(key, "desc")) {
 				cur.desc = strdup(val);
-			} else if (!strcasecmp(key, "since") || !strcasecmp(key, "until")) {
-				for (sp = val; *sp && !isspace((unsigned char)*sp); sp++) ;
-				*sp = '\0';		/* first token (drop inline comment) */
+			}
+			else if (!strcasecmp(key, "since") || !strcasecmp(key, "until")) {
+				for (sp = val; *sp && !isspace((unsigned char)*sp); sp++)
+					;
+				*sp = '\0'; /* first token (drop inline comment) */
 				r = release_parse(val);
 				if (r != REL_NONE) {
-					if (!strcasecmp(key, "since")) cur.since = r;
-					else cur.until = r;
+					if (!strcasecmp(key, "since"))
+						cur.since = r;
+					else
+						cur.until = r;
 				}
-			} else if (!strcasecmp(key, "partitions")) {
+			}
+			else if (!strcasecmp(key, "partitions")) {
 				/* letter:start:len ... (space/comma separated, 512-blocks) */
-				disk_part *pv = NULL; int pn = 0; char *tok, *tsv;
+				disk_part *pv = NULL;
+				int pn = 0;
+				char *tok, *tsv;
 				for (tok = strtok_r(val, " \t,", &tsv); tok; tok = strtok_r(NULL, " \t,", &tsv)) {
-					char L; unsigned long st, ln;
+					char L;
+					unsigned long st, ln;
 					if (sscanf(tok, "%c:%lu:%lu", &L, &st, &ln) != 3)
 						continue;
 					pv = realloc(pv, (size_t)(pn + 1) * sizeof *pv);
-					if (!pv) { perror("s5fs: realloc"); exit(1); }
-					pv[pn].letter = L; pv[pn].start = (uint32_t)st; pv[pn].len = (uint32_t)ln;
+					if (!pv) {
+						perror("s5fs: realloc");
+						exit(1);
+					}
+					pv[pn].letter = L;
+					pv[pn].start = (uint32_t)st;
+					pv[pn].len = (uint32_t)ln;
 					pn++;
 				}
-				cur.parts = pv; cur.nparts = pn;
+				cur.parts = pv;
+				cur.nparts = pn;
 			}
 			/* unknown keys ignored -- forward-compat (sectors/tracks/...) */
 		}
@@ -231,7 +265,8 @@ static void load_user(const char *path)
 	fclose(f);
 }
 
-static void ensure_loaded(void)
+static void
+ensure_loaded(void)
 {
 	const char *env, *home;
 	char path[512];
@@ -240,14 +275,18 @@ static void ensure_loaded(void)
 		return;
 	loaded = 1;
 	table = malloc(sizeof builtin);
-	if (!table) { perror("s5fs: malloc"); exit(1); }
+	if (!table) {
+		perror("s5fs: malloc");
+		exit(1);
+	}
 	memcpy(table, builtin, sizeof builtin);
 	ntable = NBUILTIN;
 
 	env = getenv("S5FS_DEVICES");
 	if (env && *env) {
 		load_user(env);
-	} else if ((home = getenv("HOME")) != NULL) {
+	}
+	else if ((home = getenv("HOME")) != NULL) {
 		snprintf(path, sizeof path, "%s/.config/s5fs/devices", home);
 		load_user(path);
 	}
@@ -255,7 +294,8 @@ static void ensure_loaded(void)
 
 /* ---- public API --------------------------------------------------- */
 
-const disk_dev *device_find(const char *name)
+const disk_dev *
+device_find(const char *name)
 {
 	int i;
 	ensure_loaded();
@@ -265,7 +305,8 @@ const disk_dev *device_find(const char *name)
 	return NULL;
 }
 
-int device_partition(const disk_dev *dev, char letter, uint32_t *start, uint32_t *len)
+int
+device_partition(const disk_dev *dev, char letter, uint32_t *start, uint32_t *len)
 {
 	int i;
 	if (!dev || !dev->parts)
@@ -273,26 +314,28 @@ int device_partition(const disk_dev *dev, char letter, uint32_t *start, uint32_t
 	for (i = 0; i < dev->nparts; i++)
 		if (dev->parts[i].letter == letter) {
 			*start = dev->parts[i].start;
-			*len   = dev->parts[i].len;
+			*len = dev->parts[i].len;
 			return 0;
 		}
 	return -1;
 }
 
-int device_resolve_part(const char *devname, char letter, const char *ospec,
-                        long long *base_bytes, uint32_t *len512)
+int
+device_resolve_part(const char *devname, char letter, const char *ospec,
+		    long long *base_bytes, uint32_t *len512)
 {
 	*base_bytes = 0;
 	*len512 = 0;
-	if (ospec) {				/* raw START[:LEN] in 512-byte blocks */
+	if (ospec) { /* raw START[:LEN] in 512-byte blocks */
 		char *colon;
 		unsigned long st = strtoul(ospec, &colon, 0), ln = 0;
-		if (*colon == ':') ln = strtoul(colon + 1, NULL, 0);
+		if (*colon == ':')
+			ln = strtoul(colon + 1, NULL, 0);
 		*base_bytes = (long long)st * 512;
 		*len512 = (uint32_t)ln;
 		return 0;
 	}
-	if (letter) {				/* -P <letter> needs a device table */
+	if (letter) { /* -P <letter> needs a device table */
 		const disk_dev *dev;
 		uint32_t s, l;
 		if (!devname) {
@@ -306,16 +349,18 @@ int device_resolve_part(const char *devname, char letter, const char *ospec,
 		}
 		if (device_partition(dev, letter, &s, &l) < 0) {
 			fprintf(stderr, "s5fs: %s has no partition '%c' "
-			        "(try `s5fs devices %s`)\n", devname, letter, devname);
+					"(try `s5fs devices %s`)\n",
+				devname, letter, devname);
 			return -1;
 		}
 		*base_bytes = (long long)s * 512;
 		*len512 = l;
 	}
-	return 0;				/* neither -> whole image (base 0) */
+	return 0; /* neither -> whole image (base 0) */
 }
 
-void device_show_parts(const char *name)
+void
+device_show_parts(const char *name)
 {
 	const disk_dev *dev = device_find(name);
 	int i;
@@ -325,7 +370,8 @@ void device_show_parts(const char *name)
 	}
 	if (!dev->parts || dev->nparts == 0) {
 		printf("%s (%u blocks): no partition table -- the whole disk is one "
-		       "filesystem (no -P needed)\n", dev->name, dev->blocks);
+		       "filesystem (no -P needed)\n",
+		       dev->name, dev->blocks);
 		return;
 	}
 	printf("%s -- %s\npartitions (512-byte blocks):\n", dev->name, dev->desc);
@@ -338,7 +384,8 @@ void device_show_parts(const char *name)
 	printf("(overlap is normal: a/b/c tile the disk, g/h alias the whole drive)\n");
 }
 
-void device_list(void)
+void
+device_list(void)
 {
 	int i;
 	ensure_loaded();
@@ -349,7 +396,7 @@ void device_list(void)
 			snprintf(range, sizeof range, "%s", release_name(table[i].since));
 		else
 			snprintf(range, sizeof range, "%s-%s",
-			         release_name(table[i].since), release_name(table[i].until));
+				 release_name(table[i].since), release_name(table[i].until));
 		printf("%-8s %10u  %-8s  %s\n",
 		       table[i].name, table[i].blocks, range, table[i].desc);
 	}
@@ -358,23 +405,24 @@ void device_list(void)
 		       nuser, nuser == 1 ? "y" : "ies", srcpath);
 }
 
-int device_advise(const disk_dev *dev, bsd_rel target)
+int
+device_advise(const disk_dev *dev, bsd_rel target)
 {
 	if (target == REL_NONE || !dev)
 		return 0;
 	if (target < dev->since) {
 		fprintf(stderr,
-		    "s5fs: note: %s's controller isn't usually in a %s kernel "
-		    "(it appears around %s). Fine if yours has the driver "
-		    "(e.g. backported) -- continuing.\n",
-		    dev->name, release_name(target), release_name(dev->since));
+			"s5fs: note: %s's controller isn't usually in a %s kernel "
+			"(it appears around %s). Fine if yours has the driver "
+			"(e.g. backported) -- continuing.\n",
+			dev->name, release_name(target), release_name(dev->since));
 		return 1;
 	}
 	if (target > dev->until) {
 		fprintf(stderr,
-		    "s5fs: note: %s was typically retired by %s. Fine if your %s "
-		    "kernel still has the driver -- continuing.\n",
-		    dev->name, release_name(dev->until), release_name(target));
+			"s5fs: note: %s was typically retired by %s. Fine if your %s "
+			"kernel still has the driver -- continuing.\n",
+			dev->name, release_name(dev->until), release_name(target));
 		return 1;
 	}
 	return 0;

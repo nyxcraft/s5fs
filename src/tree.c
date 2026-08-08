@@ -16,28 +16,37 @@
  * building the tree
  * ------------------------------------------------------------------ */
 
-static tnode *node_new(const char *name, int kind)
+static tnode *
+node_new(const char *name, int kind)
 {
 	tnode *n = calloc(1, sizeof *n);
-	if (!n) { perror("s5fs: calloc"); exit(1); }
+	if (!n) {
+		perror("s5fs: calloc");
+		exit(1);
+	}
 	n->name = name ? strdup(name) : NULL;
 	n->kind = kind;
 	n->perm = 0755;
 	return n;
 }
 
-static void dir_add(tnode *dir, tnode *child)
+static void
+dir_add(tnode *dir, tnode *child)
 {
 	if (dir->nkids == dir->kidcap) {
 		dir->kidcap = dir->kidcap ? dir->kidcap * 2 : 16;
 		dir->kids = realloc(dir->kids, dir->kidcap * sizeof *dir->kids);
-		if (!dir->kids) { perror("s5fs: realloc"); exit(1); }
+		if (!dir->kids) {
+			perror("s5fs: realloc");
+			exit(1);
+		}
 	}
 	child->parent = dir;
 	dir->kids[dir->nkids++] = child;
 }
 
-static tnode *dir_child(tnode *dir, const char *name)
+static tnode *
+dir_child(tnode *dir, const char *name)
 {
 	size_t i;
 	if (dir->kind != TN_DIR)
@@ -48,15 +57,17 @@ static tnode *dir_child(tnode *dir, const char *name)
 	return NULL;
 }
 
-tnode *tree_root(void)
+tnode *
+tree_root(void)
 {
 	tnode *r = node_new(NULL, TN_DIR);
-	r->parent = r;			/* root's ".." is itself */
+	r->parent = r; /* root's ".." is itself */
 	return r;
 }
 
 /* walk `path` component by component; `create` makes missing dirs. */
-static tnode *walk(tnode *root, const char *path, int create)
+static tnode *
+walk(tnode *root, const char *path, int create)
 {
 	char buf[2048];
 	char *tok, *save;
@@ -68,7 +79,7 @@ static tnode *walk(tnode *root, const char *path, int create)
 		tnode *child;
 		if (!strcmp(tok, ".") || !strcmp(tok, ""))
 			continue;
-		if (!strcmp(tok, ".."))	{	/* shouldn't appear; treat as parent */
+		if (!strcmp(tok, "..")) { /* shouldn't appear; treat as parent */
 			cur = cur->parent;
 			continue;
 		}
@@ -84,15 +95,25 @@ static tnode *walk(tnode *root, const char *path, int create)
 	return cur;
 }
 
-tnode *tree_insert(tnode *root, const char *path) { return walk(root, path, 1); }
-tnode *tree_find  (tnode *root, const char *path) { return walk(root, path, 0); }
+tnode *
+tree_insert(tnode *root, const char *path)
+{
+	return walk(root, path, 1);
+}
 
-uint32_t tree_count_inodes(const tnode *root)
+tnode *
+tree_find(tnode *root, const char *path)
+{
+	return walk(root, path, 0);
+}
+
+uint32_t
+tree_count_inodes(const tnode *root)
 {
 	uint32_t n = 0;
 	size_t i;
 	if (root->kind == TN_LINK)
-		return 0;		/* hard links reuse an inode */
+		return 0; /* hard links reuse an inode */
 	n = 1;
 	if (root->kind == TN_DIR)
 		for (i = 0; i < root->nkids; i++)
@@ -105,11 +126,12 @@ uint32_t tree_count_inodes(const tnode *root)
  * ------------------------------------------------------------------ */
 
 /* pass 1: hand out inode numbers, pre-order (root first). */
-static void assign_inodes(S5FS *fs, tnode *n)
+static void
+assign_inodes(S5FS *fs, tnode *n)
 {
 	size_t i;
 	if (n->kind == TN_LINK)
-		return;			/* uses linkto's inode */
+		return; /* uses linkto's inode */
 	n->ino = s5fs_ialloc(fs);
 	if (n->kind == TN_DIR)
 		for (i = 0; i < n->nkids; i++)
@@ -117,39 +139,48 @@ static void assign_inodes(S5FS *fs, tnode *n)
 }
 
 /* pass 2: link count = number of directory entries that will point at a node */
-static void count_links(tnode *n)
+static void
+count_links(tnode *n)
 {
 	size_t i;
 	if (n->kind != TN_DIR)
 		return;
-	n->nlink++;			/* this dir's "." -> itself   */
-	n->parent->nlink++;		/* this dir's ".." -> parent  */
+	n->nlink++;	    /* this dir's "." -> itself   */
+	n->parent->nlink++; /* this dir's ".." -> parent  */
 	for (i = 0; i < n->nkids; i++) {
 		tnode *c = n->kids[i];
 		tnode *t = (c->kind == TN_LINK) ? c->linkto : c;
-		if (t) t->nlink++;	/* the named entry            */
+		if (t)
+			t->nlink++; /* the named entry            */
 	}
 	for (i = 0; i < n->nkids; i++)
 		count_links(n->kids[i]);
 }
 
 /* stream a regular file's content into inode `in` */
-static void write_reg(S5FS *fs, tnode *n, s5fs_inode *in)
+static void
+write_reg(S5FS *fs, tnode *n, s5fs_inode *in)
 {
 	uint32_t nblk = (n->size + fs->bsize - 1) / fs->bsize, b;
 	int32_t *da = nblk ? malloc(nblk * sizeof *da) : NULL;
 	uint8_t *buf = malloc(fs->bsize);
 
-	if ((nblk && !da) || !buf) { free(da); free(buf); return; }
+	if ((nblk && !da) || !buf) {
+		free(da);
+		free(buf);
+		return;
+	}
 	if (nblk)
 		lseek(n->src_fd, n->src_off, SEEK_SET);
 	for (b = 0; b < nblk; b++) {
 		uint32_t want = n->size - b * fs->bsize, got = 0;
-		if (want > fs->bsize) want = fs->bsize;
+		if (want > fs->bsize)
+			want = fs->bsize;
 		memset(buf, 0, fs->bsize);
 		while (got < want) {
 			ssize_t r = read(n->src_fd, buf + got, want - got);
-			if (r <= 0) break;
+			if (r <= 0)
+				break;
 			got += (uint32_t)r;
 		}
 		da[b] = s5fs_alloc(fs);
@@ -157,11 +188,13 @@ static void write_reg(S5FS *fs, tnode *n, s5fs_inode *in)
 	}
 	s5fs_setblocks(fs, in, da, nblk);
 	in->size = (int32_t)n->size;
-	free(buf); free(da);
+	free(buf);
+	free(da);
 }
 
 /* build and store a directory's data block(s): ".", "..", then children */
-static void write_dir(S5FS *fs, tnode *n, s5fs_inode *in)
+static void
+write_dir(S5FS *fs, tnode *n, s5fs_inode *in)
 {
 	uint32_t nent = (uint32_t)n->nkids + 2;
 	uint32_t len = nent * P11_DIRENTSZ;
@@ -170,18 +203,23 @@ static void write_dir(S5FS *fs, tnode *n, s5fs_inode *in)
 	int32_t *da;
 	size_t i;
 
-	if (!db) return;
-	fs->bo->put16(db + 0 * P11_DIRENTSZ, (uint16_t)n->ino);   db[2] = '.';
+	if (!db)
+		return;
+	fs->bo->put16(db + 0 * P11_DIRENTSZ, (uint16_t)n->ino);
+	db[2] = '.';
 	fs->bo->put16(db + 1 * P11_DIRENTSZ, (uint16_t)n->parent->ino);
-	db[P11_DIRENTSZ + 2] = '.'; db[P11_DIRENTSZ + 3] = '.';
+	db[P11_DIRENTSZ + 2] = '.';
+	db[P11_DIRENTSZ + 3] = '.';
 	for (i = 0; i < n->nkids; i++) {
 		tnode *c = n->kids[i];
 		tnode *t = (c->kind == TN_LINK) ? c->linkto : c;
 		uint8_t *e = db + (i + 2) * P11_DIRENTSZ;
 		size_t l;
-		if (!t) continue;		/* dangling hard link */
+		if (!t)
+			continue; /* dangling hard link */
 		l = strlen(c->name);
-		if (l > P11_DIRSIZ) l = P11_DIRSIZ;
+		if (l > P11_DIRSIZ)
+			l = P11_DIRSIZ;
 		fs->bo->put16(e, (uint16_t)t->ino);
 		memcpy((char *)e + 2, c->name, l);
 	}
@@ -194,17 +232,19 @@ static void write_dir(S5FS *fs, tnode *n, s5fs_inode *in)
 	}
 	s5fs_setblocks(fs, in, da, nblk);
 	in->size = (int32_t)len;
-	free(da); free(db);
+	free(da);
+	free(db);
 }
 
 /* pass 3: write each node's inode (and data), recursing into directories */
-static void write_node(S5FS *fs, tnode *n)
+static void
+write_node(S5FS *fs, tnode *n)
 {
 	s5fs_inode in;
 	size_t i;
 
 	if (n->kind == TN_LINK)
-		return;			/* only the named entry, no inode */
+		return; /* only the named entry, no inode */
 
 	memset(&in, 0, sizeof in);
 	in.number = (uint16_t)n->ino;
@@ -236,7 +276,8 @@ static void write_node(S5FS *fs, tnode *n)
 			write_node(fs, n->kids[i]);
 }
 
-int tree_serialize(S5FS *fs, tnode *root)
+int
+tree_serialize(S5FS *fs, tnode *root)
 {
 	assign_inodes(fs, root);
 	count_links(root);

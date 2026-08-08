@@ -23,25 +23,27 @@
 #include <errno.h>
 #include <sys/stat.h>
 
-static void usage(void)
+static void
+usage(void)
 {
 	fprintf(stderr,
-	    "usage: s5fs mkfs [-B 512|1024|2048] [-a pdp11|le|be] [-F v7|sysv]\n"
-	    "                 [-d device | -b blocks | -s sectors] [-P part | -o START:LEN]\n"
-	    "                 [-r release] [-m m] [-n n] [-t mtime] [-i ninode] image\n"
-	    "\n"
-	    "  -a arch  on-disk byte order: pdp11 (default), le (vax/x86), be (m68k)\n"
-	    "  -d dev   size the image for a known disk ('s5fs devices')\n"
-	    "  -P part  lay the fs into partition 'part' of a whole-disk image (needs -d)\n"
-	    "  -o s:l   ..or a raw window: START:LEN in 512-byte blocks\n"
-	    "  -F fmt   superblock flavor: v7 (default) or sysv (adds the System V\n"
-	    "           magic + block-size type so a SysV kernel auto-detects it)\n"
-	    "  -r rel   OPTIONAL target release (v7|2.8|2.9|2.10) -- only enables a\n"
-	    "           gentle driver-availability note; the image is release-agnostic\n");
+		"usage: s5fs mkfs [-B 512|1024|2048] [-a pdp11|le|be] [-F v7|sysv]\n"
+		"                 [-d device | -b blocks | -s sectors] [-P part | -o START:LEN]\n"
+		"                 [-r release] [-m m] [-n n] [-t mtime] [-i ninode] image\n"
+		"\n"
+		"  -a arch  on-disk byte order: pdp11 (default), le (vax/x86), be (m68k)\n"
+		"  -d dev   size the image for a known disk ('s5fs devices')\n"
+		"  -P part  lay the fs into partition 'part' of a whole-disk image (needs -d)\n"
+		"  -o s:l   ..or a raw window: START:LEN in 512-byte blocks\n"
+		"  -F fmt   superblock flavor: v7 (default) or sysv (adds the System V\n"
+		"           magic + block-size type so a SysV kernel auto-detects it)\n"
+		"  -r rel   OPTIONAL target release (v7|2.8|2.9|2.10) -- only enables a\n"
+		"           gentle driver-availability note; the image is release-agnostic\n");
 	exit(2);
 }
 
-static unsigned long must_num(const char *s, const char *what)
+static unsigned long
+must_num(const char *s, const char *what)
 {
 	char *end;
 	unsigned long v = strtoul(s, &end, 0);
@@ -53,7 +55,8 @@ static unsigned long must_num(const char *s, const char *what)
 	return v;
 }
 
-int cmd_mkfs(int argc, char **argv)
+int
+cmd_mkfs(int argc, char **argv)
 {
 	s5fs_opts opts;
 	S5FS fs;
@@ -68,37 +71,62 @@ int cmd_mkfs(int argc, char **argv)
 	int fd, c;
 
 	memset(&opts, 0, sizeof opts);
-	opts.mtime = -1;		/* default: now */
+	opts.mtime = -1; /* default: now */
 
 	while ((c = getopt(argc, argv, "B:a:d:r:b:s:m:n:t:i:P:o:F:")) != -1) {
 		switch (c) {
-		case 'B': opts.bsize  = (uint32_t)must_num(optarg, "block size"); break;
+		case 'B':
+			opts.bsize = (uint32_t)must_num(optarg, "block size");
+			break;
 		case 'a':
 			opts.endian = s5_endian_parse(optarg);
 			if (opts.endian == S5_NENDIAN) {
 				fprintf(stderr, "s5fs mkfs: unknown byte order '%s' "
-				        "(use pdp11|le|be)\n", optarg);
+						"(use pdp11|le|be)\n",
+					optarg);
 				return 2;
 			}
 			break;
-		case 'b': blocks      = must_num(optarg, "block count");          break;
-		case 's': sectors     = must_num(optarg, "sector count");         break;
-		case 'm': opts.m      = (int32_t)must_num(optarg, "m");           break;
-		case 'n': opts.n      = (int32_t)must_num(optarg, "n");           break;
-		case 't': opts.mtime  = (int64_t)must_num(optarg, "mtime");       break;
-		case 'i': opts.ninode = (uint32_t)must_num(optarg, "ninode");     break;
-		case 'P': part = optarg[0]; break;
-		case 'o': ospec = optarg;   break;
+		case 'b':
+			blocks = must_num(optarg, "block count");
+			break;
+		case 's':
+			sectors = must_num(optarg, "sector count");
+			break;
+		case 'm':
+			opts.m = (int32_t)must_num(optarg, "m");
+			break;
+		case 'n':
+			opts.n = (int32_t)must_num(optarg, "n");
+			break;
+		case 't':
+			opts.mtime = (int64_t)must_num(optarg, "mtime");
+			break;
+		case 'i':
+			opts.ninode = (uint32_t)must_num(optarg, "ninode");
+			break;
+		case 'P':
+			part = optarg[0];
+			break;
+		case 'o':
+			ospec = optarg;
+			break;
 		case 'F':
-			if (!strcmp(optarg, "sysv") || !strcmp(optarg, "s5")) opts.sysv = 1;
-			else if (!strcmp(optarg, "v7") || !strcmp(optarg, "bsd")) opts.sysv = 0;
-			else { fprintf(stderr, "s5fs mkfs: -F must be sysv or v7\n"); return 2; }
+			if (!strcmp(optarg, "sysv") || !strcmp(optarg, "s5"))
+				opts.sysv = 1;
+			else if (!strcmp(optarg, "v7") || !strcmp(optarg, "bsd"))
+				opts.sysv = 0;
+			else {
+				fprintf(stderr, "s5fs mkfs: -F must be sysv or v7\n");
+				return 2;
+			}
 			break;
 		case 'd':
 			dev = device_find(optarg);
 			if (!dev) {
 				fprintf(stderr, "s5fs mkfs: unknown device '%s' "
-				        "(see 's5fs devices')\n", optarg);
+						"(see 's5fs devices')\n",
+					optarg);
 				return 2;
 			}
 			break;
@@ -106,11 +134,13 @@ int cmd_mkfs(int argc, char **argv)
 			target = release_parse(optarg);
 			if (target == REL_NONE) {
 				fprintf(stderr, "s5fs mkfs: unknown release '%s' "
-				        "(use v7|2.8|2.9|2.10)\n", optarg);
+						"(use v7|2.8|2.9|2.10)\n",
+					optarg);
 				return 2;
 			}
 			break;
-		default:  usage();
+		default:
+			usage();
 		}
 	}
 	if (optind != argc - 1)
@@ -122,8 +152,8 @@ int cmd_mkfs(int argc, char **argv)
 			fprintf(stderr, "s5fs mkfs: give -d, -b, or -s -- not more than one\n");
 			return 2;
 		}
-		sectors = dev->blocks;		/* device table is in 512-blocks */
-		device_advise(dev, target);	/* advisory only; never blocks */
+		sectors = dev->blocks;	    /* device table is in 512-blocks */
+		device_advise(dev, target); /* advisory only; never blocks */
 	}
 
 	if (opts.bsize == 0)
@@ -151,25 +181,26 @@ int cmd_mkfs(int argc, char **argv)
 		struct stat st;
 		if (plen == 0) {
 			fprintf(stderr, "s5fs mkfs: partition needs a length "
-			        "(use -d dev -P letter, or -o START:LEN)\n");
+					"(use -d dev -P letter, or -o START:LEN)\n");
 			return 2;
 		}
 		opts.base = base;
-		blocks = plen / per;			/* the fs fills exactly the partition */
-		fd = open(path, O_RDWR | O_CREAT, 0666);	/* do NOT truncate a whole-disk file */
+		blocks = plen / per;			 /* the fs fills exactly the partition */
+		fd = open(path, O_RDWR | O_CREAT, 0666); /* do NOT truncate a whole-disk file */
 		if (fd < 0) {
 			fprintf(stderr, "s5fs mkfs: %s: %s\n", path, strerror(errno));
 			return 1;
 		}
-		need = base + (off_t)plen * 512;		/* end of this partition */
+		need = base + (off_t)plen * 512; /* end of this partition */
 		if (dev && (off_t)dev->blocks * 512 > need)
-			need = (off_t)dev->blocks * 512;	/* size to the whole drive */
+			need = (off_t)dev->blocks * 512; /* size to the whole drive */
 		if (fstat(fd, &st) == 0 && st.st_size < need && ftruncate(fd, need) < 0) {
 			fprintf(stderr, "s5fs mkfs: %s: %s\n", path, strerror(errno));
 			close(fd);
 			return 1;
 		}
-	} else {
+	}
+	else {
 		if (blocks == 0) {
 			fprintf(stderr, "s5fs mkfs: need a size (-d, -b, or -s)\n");
 			usage();

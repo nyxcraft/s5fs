@@ -20,8 +20,8 @@
 
 /* s5fs-family releases, ordered oldest->newest.  Advisory only. */
 typedef enum {
-	REL_NONE = -1,	/* caller gave no target -> never warn */
-	REL_V7   = 0,
+	REL_NONE = -1, /* caller gave no target -> never warn */
+	REL_V7 = 0,
 	REL_28,
 	REL_29,
 	REL_210
@@ -32,19 +32,19 @@ typedef enum {
  * disk must match the kernel, so these mirror sys/GENERIC/ioconf.c.  Overlap is
  * normal (a+b+c tile the disk while g/h alias the whole thing). */
 typedef struct {
-	char     letter;	/* 'a'..'h'                          */
-	uint32_t start;		/* first block, in 512-byte blocks   */
-	uint32_t len;		/* length in 512-byte blocks         */
+	char letter;	/* 'a'..'h'                          */
+	uint32_t start; /* first block, in 512-byte blocks   */
+	uint32_t len;	/* length in 512-byte blocks         */
 } disk_part;
 
 typedef struct {
 	const char *name;	/* --device token, e.g. "rl02"       */
 	const char *desc;	/* human description incl. controller */
-	uint32_t    blocks;	/* capacity in 512-byte blocks        */
-	bsd_rel     since;	/* driver usually present from here.. */
-	bsd_rel     until;	/* ..through here (advisory)          */
-	const disk_part *parts;	/* partition table, or NULL if none  */
-	int         nparts;
+	uint32_t blocks;	/* capacity in 512-byte blocks        */
+	bsd_rel since;		/* driver usually present from here.. */
+	bsd_rel until;		/* ..through here (advisory)          */
+	const disk_part *parts; /* partition table, or NULL if none  */
+	int nparts;
 } disk_dev;
 
 /* Look up a device by name (case-insensitive); NULL if unknown. */
@@ -61,7 +61,7 @@ int device_partition(const disk_dev *dev, char letter, uint32_t *start, uint32_t
  * Returns 0 (fills *base_bytes and *len512, len512 0 = to end), or -1 with a
  * message on stderr (unknown device, missing partition, bad -o). */
 int device_resolve_part(const char *devname, char letter, const char *ospec,
-                        long long *base_bytes, uint32_t *len512);
+			long long *base_bytes, uint32_t *len512);
 
 /* Print the device table to stdout (name==NULL) or one device's partitions. */
 void device_list(void);

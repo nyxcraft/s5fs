@@ -307,9 +307,17 @@ original C — keep it that way; don't vendor copyrighted data into it.
   rewrite removed.
 - **Nothing gets pushed to any remote** without an explicit ask.
 - **No external dependencies** in the default build. FUSE is the sole opt-in.
-- **Style:** match the surrounding code — tabs, terse comments that explain
-  *why*, block comments at the top of each file stating that file's contract.
-  Keep every new subcommand thin and route it through the shared engine.
+- **Style:** BSD KNF / style(9) with extra vertical breathing room, enforced by
+  the repo's `.clang-format` (settings identical to vax11-xdev's). Tabs, terse
+  comments that explain *why*, a block comment at the top of each file stating
+  that file's contract. Keep every new subcommand thin and route it through the
+  shared engine.
+- **Format your own edits, not the tree.** `clang-format` cannot see that a
+  construct is a table, so it collapses the columns that *are* the
+  documentation. The data tables — `subcmds[]` in `s5fs.c`, `codecs[]` in
+  `s5endian.c`, the disk/partition tables in `device.c`, the field offsets in
+  `pdp11fs.h` — are fenced with `/* clang-format off */` and must stay fenced.
+  Add a table, fence it.
 - **Tests are not optional.** New behavior → new check in `tests/run.sh`, and it
   must end `fsck clean` if it mutates.
 

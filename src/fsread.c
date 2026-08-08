@@ -12,7 +12,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-static int rdblk(FSR *r, uint32_t bno, uint8_t *buf)
+static int
+rdblk(FSR *r, uint32_t bno, uint8_t *buf)
 {
 	off_t off = (off_t)(r->base + (int64_t)bno * r->bsize);
 	if (lseek(r->fd, off, SEEK_SET) < 0 ||
@@ -21,10 +22,15 @@ static int rdblk(FSR *r, uint32_t bno, uint8_t *buf)
 	return 0;
 }
 
-int fsr_bread(FSR *r, uint32_t bno, uint8_t *buf) { return rdblk(r, bno, buf); }
+int
+fsr_bread(FSR *r, uint32_t bno, uint8_t *buf)
+{
+	return rdblk(r, bno, buf);
+}
 
 /* choose the byte order whose superblock decode is sane against the file size */
-static const s5_codec *detect_bo(int fd, uint32_t bsize, const uint8_t *sb)
+static const s5_codec *
+detect_bo(int fd, uint32_t bsize, const uint8_t *sb)
 {
 	struct stat st;
 	uint32_t fileblocks;
@@ -42,39 +48,57 @@ static const s5_codec *detect_bo(int fd, uint32_t bsize, const uint8_t *sb)
 	return NULL;
 }
 
-int fsr_open(FSR *r, const char *path, uint32_t bsize, int forced_bo, int64_t base)
+int
+fsr_open(FSR *r, const char *path, uint32_t bsize, int forced_bo, int64_t base)
 {
 	uint8_t sb[P11_MAXBSIZE];
 
 	memset(r, 0, sizeof *r);
-	if (bsize == 0) bsize = 1024;
-	if (!P11_BSIZE_OK(bsize)) return -1;
+	if (bsize == 0)
+		bsize = 1024;
+	if (!P11_BSIZE_OK(bsize))
+		return -1;
 	r->fd = open(path, O_RDONLY);
-	if (r->fd < 0) return -1;
+	if (r->fd < 0)
+		return -1;
 
-	r->base    = base;
-	r->bsize   = bsize;
-	r->inopb   = bsize / P11_DINODESZ;
-	r->naddr   = (bsize == 1024) ? 7 : 13;
-	r->laddr   = r->naddr - 3;
-	r->nindir  = bsize / 4;
+	r->base = base;
+	r->bsize = bsize;
+	r->inopb = bsize / P11_DINODESZ;
+	r->naddr = (bsize == 1024) ? 7 : 13;
+	r->laddr = r->naddr - 3;
+	r->nindir = bsize / 4;
 	r->ndirect = bsize / P11_DIRENTSZ;
 
-	if (rdblk(r, P11_SUPERBLK, sb) < 0) { close(r->fd); return -1; }
+	if (rdblk(r, P11_SUPERBLK, sb) < 0) {
+		close(r->fd);
+		return -1;
+	}
 	r->bo = (forced_bo >= 0) ? s5_codec_for((s5_endian)forced_bo)
-	                         : detect_bo(r->fd, bsize, sb);
-	if (!r->bo) { close(r->fd); return -1; }
+				 : detect_bo(r->fd, bsize, sb);
+	if (!r->bo) {
+		close(r->fd);
+		return -1;
+	}
 	r->isize = r->bo->get16(sb + P11_SB_ISIZE);
 	r->fsize = r->bo->get32(sb + P11_SB_FSIZE);
 	if (r->isize < P11_ILISTSTART || r->isize >= r->fsize || r->fsize == 0) {
-		close(r->fd); return -1;
+		close(r->fd);
+		return -1;
 	}
 	return 0;
 }
 
-void fsr_close(FSR *r) { if (r->fd >= 0) close(r->fd); r->fd = -1; }
+void
+fsr_close(FSR *r)
+{
+	if (r->fd >= 0)
+		close(r->fd);
+	r->fd = -1;
+}
 
-int fsr_iget(FSR *r, uint32_t ino, fsr_inode *out)
+int
+fsr_iget(FSR *r, uint32_t ino, fsr_inode *out)
 {
 	uint8_t buf[P11_MAXBSIZE];
 	uint32_t blk = (ino + 2 * r->inopb - 1) / r->inopb;
@@ -82,14 +106,16 @@ int fsr_iget(FSR *r, uint32_t ino, fsr_inode *out)
 	uint8_t *dp;
 	uint32_t i;
 
-	if (ino == 0 || blk >= r->isize) return -1;
-	if (rdblk(r, blk, buf) < 0) return -1;
+	if (ino == 0 || blk >= r->isize)
+		return -1;
+	if (rdblk(r, blk, buf) < 0)
+		return -1;
 	dp = buf + off;
-	out->mode  = r->bo->get16(dp + P11_DI_MODE);
+	out->mode = r->bo->get16(dp + P11_DI_MODE);
 	out->nlink = (int16_t)r->bo->get16(dp + P11_DI_NLINK);
-	out->uid   = (int16_t)r->bo->get16(dp + P11_DI_UID);
-	out->gid   = (int16_t)r->bo->get16(dp + P11_DI_GID);
-	out->size  = (int32_t)r->bo->get32(dp + P11_DI_SIZE);
+	out->uid = (int16_t)r->bo->get16(dp + P11_DI_UID);
+	out->gid = (int16_t)r->bo->get16(dp + P11_DI_GID);
+	out->size = (int32_t)r->bo->get32(dp + P11_DI_SIZE);
 	out->atime = (int32_t)r->bo->get32(dp + P11_DI_ATIME);
 	out->mtime = (int32_t)r->bo->get32(dp + P11_DI_MTIME);
 	out->ctime = (int32_t)r->bo->get32(dp + P11_DI_CTIME);
@@ -99,7 +125,8 @@ int fsr_iget(FSR *r, uint32_t ino, fsr_inode *out)
 }
 
 /* logical block -> physical (0 = hole) */
-static uint32_t bmap(FSR *r, const int32_t *addr, uint32_t lbn)
+static uint32_t
+bmap(FSR *r, const int32_t *addr, uint32_t lbn)
 {
 	uint8_t buf[P11_MAXBSIZE];
 	uint32_t phys, per = r->nindir;
@@ -109,53 +136,87 @@ static uint32_t bmap(FSR *r, const int32_t *addr, uint32_t lbn)
 	lbn -= r->laddr;
 	if (lbn < per) {
 		phys = (uint32_t)addr[r->laddr];
-		if (phys && rdblk(r, phys, buf) == 0) phys = r->bo->get32(buf + 4 * lbn); else phys = 0;
-	} else if (lbn < per * per) {
+		if (phys && rdblk(r, phys, buf) == 0)
+			phys = r->bo->get32(buf + 4 * lbn);
+		else
+			phys = 0;
+	}
+	else if (lbn < per * per) {
 		lbn -= per;
 		phys = (uint32_t)addr[r->laddr + 1];
-		if (phys && rdblk(r, phys, buf) == 0) phys = r->bo->get32(buf + 4 * (lbn / per)); else phys = 0;
-		if (phys && rdblk(r, phys, buf) == 0) phys = r->bo->get32(buf + 4 * (lbn % per)); else phys = 0;
-	} else {
+		if (phys && rdblk(r, phys, buf) == 0)
+			phys = r->bo->get32(buf + 4 * (lbn / per));
+		else
+			phys = 0;
+		if (phys && rdblk(r, phys, buf) == 0)
+			phys = r->bo->get32(buf + 4 * (lbn % per));
+		else
+			phys = 0;
+	}
+	else {
 		lbn -= per * per;
 		phys = (uint32_t)addr[r->laddr + 2];
-		if (phys && rdblk(r, phys, buf) == 0) phys = r->bo->get32(buf + 4 * (lbn / (per * per))); else phys = 0;
-		if (phys && rdblk(r, phys, buf) == 0) phys = r->bo->get32(buf + 4 * ((lbn / per) % per)); else phys = 0;
-		if (phys && rdblk(r, phys, buf) == 0) phys = r->bo->get32(buf + 4 * (lbn % per)); else phys = 0;
+		if (phys && rdblk(r, phys, buf) == 0)
+			phys = r->bo->get32(buf + 4 * (lbn / (per * per)));
+		else
+			phys = 0;
+		if (phys && rdblk(r, phys, buf) == 0)
+			phys = r->bo->get32(buf + 4 * ((lbn / per) % per));
+		else
+			phys = 0;
+		if (phys && rdblk(r, phys, buf) == 0)
+			phys = r->bo->get32(buf + 4 * (lbn % per));
+		else
+			phys = 0;
 	}
 	return phys;
 }
 
-int fsr_readdir(FSR *r, const fsr_inode *dir, fsr_direntcb cb, void *arg)
+int
+fsr_readdir(FSR *r, const fsr_inode *dir, fsr_direntcb cb, void *arg)
 {
 	uint8_t buf[P11_MAXBSIZE];
 	uint32_t nblk = ((uint32_t)dir->size + r->bsize - 1) / r->bsize, b, e;
 
-	if ((dir->mode & P11_IFMT) != P11_IFDIR) return -1;
+	if ((dir->mode & P11_IFMT) != P11_IFDIR)
+		return -1;
 	for (b = 0; b < nblk; b++) {
 		uint32_t phys = bmap(r, dir->addr, b);
-		if (phys == 0 || rdblk(r, phys, buf) < 0) continue;
+		if (phys == 0 || rdblk(r, phys, buf) < 0)
+			continue;
 		for (e = 0; e < r->ndirect; e++) {
 			uint8_t *d = buf + e * P11_DIRENTSZ;
 			uint16_t di = r->bo->get16(d);
 			char name[P11_DIRSIZ + 1];
-			if (di == 0) continue;
+			if (di == 0)
+				continue;
 			memcpy(name, d + 2, P11_DIRSIZ);
 			name[P11_DIRSIZ] = '\0';
-			if (cb(arg, di, name)) return 0;
+			if (cb(arg, di, name))
+				return 0;
 		}
 	}
 	return 0;
 }
 
-struct lookctx { const char *name; uint32_t ino; };
-static int look_cb(void *arg, uint32_t ino, const char *name)
+struct lookctx {
+	const char *name;
+	uint32_t ino;
+};
+
+static int
+look_cb(void *arg, uint32_t ino, const char *name)
 {
 	struct lookctx *l = arg;
-	if (strcmp(l->name, name) == 0) { l->ino = ino; return 1; }
+	if (strcmp(l->name, name) == 0) {
+		l->ino = ino;
+		return 1;
+	}
 	return 0;
 }
 
-uint32_t fsr_namei(FSR *r, const char *path)
+uint32_t
+fsr_namei(FSR *r, const char *path)
 {
 	char buf[2048], *tok, *save;
 	uint32_t ino = P11_ROOTINO;
@@ -165,34 +226,43 @@ uint32_t fsr_namei(FSR *r, const char *path)
 	for (tok = strtok_r(buf, "/", &save); tok; tok = strtok_r(NULL, "/", &save)) {
 		fsr_inode in;
 		struct lookctx l;
-		if (fsr_iget(r, ino, &in) < 0) return 0;
-		if ((in.mode & P11_IFMT) != P11_IFDIR) return 0;
-		l.name = tok; l.ino = 0;
+		if (fsr_iget(r, ino, &in) < 0)
+			return 0;
+		if ((in.mode & P11_IFMT) != P11_IFDIR)
+			return 0;
+		l.name = tok;
+		l.ino = 0;
 		fsr_readdir(r, &in, look_cb, &l);
-		if (l.ino == 0) return 0;
+		if (l.ino == 0)
+			return 0;
 		ino = l.ino;
 	}
 	return ino;
 }
 
-long fsr_readfile(FSR *r, const fsr_inode *in, void *vbuf, long size, long off)
+long
+fsr_readfile(FSR *r, const fsr_inode *in, void *vbuf, long size, long off)
 {
 	uint8_t *buf = vbuf, blk[P11_MAXBSIZE];
 	long done = 0;
 
-	if (off >= in->size) return 0;
-	if (off + size > in->size) size = in->size - off;
+	if (off >= in->size)
+		return 0;
+	if (off + size > in->size)
+		size = in->size - off;
 	while (done < size) {
 		uint32_t lbn = (uint32_t)((off + done) / r->bsize);
 		uint32_t boff = (uint32_t)((off + done) % r->bsize);
 		uint32_t want = r->bsize - boff;
 		uint32_t phys;
-		if ((long)want > size - done) want = (uint32_t)(size - done);
+		if ((long)want > size - done)
+			want = (uint32_t)(size - done);
 		phys = bmap(r, in->addr, lbn);
 		if (phys == 0)
-			memset(buf + done, 0, want);		/* hole */
+			memset(buf + done, 0, want); /* hole */
 		else {
-			if (rdblk(r, phys, blk) < 0) break;
+			if (rdblk(r, phys, blk) < 0)
+				break;
 			memcpy(buf + done, blk + boff, want);
 		}
 		done += want;

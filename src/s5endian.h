@@ -25,7 +25,7 @@
 #include <stdint.h>
 
 typedef enum {
-	S5_PDP11 = 0,	/* keep 0: the zero-initialised default */
+	S5_PDP11 = 0, /* keep 0: the zero-initialised default */
 	S5_LE,
 	S5_BE,
 	S5_NENDIAN
@@ -33,11 +33,11 @@ typedef enum {
 
 typedef struct {
 	const char *name;
-	void     (*put16)(uint8_t *, uint16_t);
+	void (*put16)(uint8_t *, uint16_t);
 	uint16_t (*get16)(const uint8_t *);
-	void     (*put32)(uint8_t *, uint32_t);
+	void (*put32)(uint8_t *, uint32_t);
 	uint32_t (*get32)(const uint8_t *);
-	void     (*put24)(uint8_t *, uint32_t);	/* 3-byte packed block address */
+	void (*put24)(uint8_t *, uint32_t); /* 3-byte packed block address */
 	uint32_t (*get24)(const uint8_t *);
 } s5_codec;
 

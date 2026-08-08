@@ -391,9 +391,17 @@ was rewritten once to strip them, so adding one back reintroduces what that
 rewrite removed.</li>
 <li><strong>Nothing gets pushed to any remote</strong> without an explicit ask.</li>
 <li><strong>No external dependencies</strong> in the default build. FUSE is the sole opt-in.</li>
-<li><strong>Style:</strong> match the surrounding code — tabs, terse comments that explain
-<em>why</em>, block comments at the top of each file stating that file's contract.
-Keep every new subcommand thin and route it through the shared engine.</li>
+<li><strong>Style:</strong> BSD KNF / style(9) with extra vertical breathing room, enforced by
+the repo's <code>.clang-format</code> (settings identical to vax11-xdev's). Tabs, terse
+comments that explain <em>why</em>, a block comment at the top of each file stating
+that file's contract. Keep every new subcommand thin and route it through the
+shared engine.</li>
+<li><strong>Format your own edits, not the tree.</strong> <code>clang-format</code> cannot see that a
+construct is a table, so it collapses the columns that <em>are</em> the
+documentation. The data tables — <code>subcmds[]</code> in <code>s5fs.c</code>, <code>codecs[]</code> in
+<code>s5endian.c</code>, the disk/partition tables in <code>device.c</code>, the field offsets in
+<code>pdp11fs.h</code> — are fenced with <code>/* clang-format off */</code> and must stay fenced.
+Add a table, fence it.</li>
 <li><strong>Tests are not optional.</strong> New behavior → new check in <code>tests/run.sh</code>, and it
 must end <code>fsck clean</code> if it mutates.</li>
 </ul>

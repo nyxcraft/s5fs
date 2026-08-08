@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 
+/* clang-format off */		/* the column layout IS the usage message */
 static const struct subcmd {
 	const char *name;
 	int       (*fn)(int, char **);
@@ -59,9 +60,12 @@ static const struct subcmd {
 	{ "mount",   cmd_mount,   "FUSE-mount an image read-only (make FUSE=1)" },
 	{ "umount",  cmd_umount,  "unmount a FUSE mount"                     },
 };
+/* clang-format on */
+
 #define NSUB ((int)(sizeof subcmds / sizeof subcmds[0]))
 
-static int usage(int rc)
+static int
+usage(int rc)
 {
 	int i;
 
@@ -72,7 +76,8 @@ static int usage(int rc)
 	return rc;
 }
 
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
 	const char *cmd;
 	int i;
@@ -82,7 +87,7 @@ int main(int argc, char **argv)
 	cmd = argv[1];
 	if (strcmp(cmd, "-h") == 0 || strcmp(cmd, "--help") == 0 || strcmp(cmd, "help") == 0)
 		return usage(0);
-	if (strcmp(cmd, "unmount") == 0)		/* friendly alias */
+	if (strcmp(cmd, "unmount") == 0) /* friendly alias */
 		return cmd_umount(argc - 1, argv + 1);
 
 	for (i = 0; i < NSUB; i++)

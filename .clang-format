@@ -1,0 +1,47 @@
+# BSD KNF / style(9) with extra vertical breathing room.  Settings identical to
+# vax11-xdev's src/*/.clang-format:
+#  - blank line between every top-level definition (SeparateDefinitionBlocks)
+#  - break before else / while, so every closing brace sits on its own line
+#
+# SCOPE: this describes how to format code you are WRITING.  Format your own
+# edits, read the diff, and keep any hand alignment the tool would destroy.
+#
+# This tree is unusually tabular -- the subcommand table in s5fs.c, the codec
+# table in s5endian.c, the disk table in device.c, the field-offset defines in
+# pdp11fs.h -- and clang-format cannot see that a construct is a table, so it
+# collapses the columns that ARE the documentation.  Those regions are fenced
+# with /* clang-format off */ ... /* clang-format on */ and must stay fenced.
+# If you add a table, fence it.
+Language: Cpp
+BasedOnStyle: LLVM
+UseTab: Always
+TabWidth: 8
+IndentWidth: 8
+ContinuationIndentWidth: 8
+ColumnLimit: 0
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeElse: true
+  BeforeWhile: true
+  IndentBraces: false
+AlwaysBreakAfterReturnType: TopLevelDefinitions
+SeparateDefinitionBlocks: Always
+IndentCaseLabels: false
+PointerAlignment: Right
+SpaceBeforeParens: ControlStatements
+SortIncludes: Never
+IndentPPDirectives: None
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AlignTrailingComments: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1

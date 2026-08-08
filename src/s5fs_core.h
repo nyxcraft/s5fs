@@ -22,61 +22,61 @@
  * inode, trimmed to what the writer needs).  Block numbers are host ints;
  * they are packed to 3-byte on-disk addresses only in s5fs_iput(). */
 typedef struct {
-	uint16_t number;			/* inode number (1-based) */
-	uint16_t mode;				/* IF* | permission bits  */
-	int16_t  nlink;
-	int16_t  uid;
-	int16_t  gid;
-	int32_t  size;				/* bytes */
-	int32_t  atime, mtime, ctime;		/* 0 => stamp fs->s_time (now) */
-	int32_t  addr[P11_MAXNADDR];		/* direct + indirect block nums */
+	uint16_t number; /* inode number (1-based) */
+	uint16_t mode;	 /* IF* | permission bits  */
+	int16_t nlink;
+	int16_t uid;
+	int16_t gid;
+	int32_t size;		     /* bytes */
+	int32_t atime, mtime, ctime; /* 0 => stamp fs->s_time (now) */
+	int32_t addr[P11_MAXNADDR];  /* direct + indirect block nums */
 } s5fs_inode;
 
 /* Tunables for a fresh filesystem.  Zero-initialise then override. */
 typedef struct {
-	uint32_t  bsize;	/* 512 or 1024; 0 => 1024 (UCB_NKB default) */
-	int32_t   m, n;		/* free-list interleave; 0 => 5, 10        */
-	int64_t   mtime;	/* inode/superblock timestamp; <0 => now    */
-	uint32_t  ninode;	/* minimum inodes; 0 => mkfs size heuristic */
-	int       boot;		/* reserved: leave block 0 for a boot image */
-	s5_endian endian;	/* on-disk byte order; 0 => S5_PDP11        */
-	int64_t   base;		/* byte offset to write the fs at (partition) */
-	int       sysv;		/* also write the System V superblock magic/type */
+	uint32_t bsize;	  /* 512 or 1024; 0 => 1024 (UCB_NKB default) */
+	int32_t m, n;	  /* free-list interleave; 0 => 5, 10        */
+	int64_t mtime;	  /* inode/superblock timestamp; <0 => now    */
+	uint32_t ninode;  /* minimum inodes; 0 => mkfs size heuristic */
+	int boot;	  /* reserved: leave block 0 for a boot image */
+	s5_endian endian; /* on-disk byte order; 0 => S5_PDP11        */
+	int64_t base;	  /* byte offset to write the fs at (partition) */
+	int sysv;	  /* also write the System V superblock magic/type */
 } s5fs_opts;
 
 /* The writer handle.  Fields after `error` are internal but exposed so
  * front-ends in the same tree can reuse the primitives. */
 typedef struct {
-	int      fd;		/* image file, opened read/write */
-	int64_t  base;		/* byte offset of the fs in the file (partition) */
-	int      sysv;		/* superblock carries the System V magic/type */
-	char     err[128];	/* last error message            */
-	int      error;		/* sticky error flag             */
-	const s5_codec *bo;	/* on-disk byte-order codec      */
+	int fd;		    /* image file, opened read/write */
+	int64_t base;	    /* byte offset of the fs in the file (partition) */
+	int sysv;	    /* superblock carries the System V magic/type */
+	char err[128];	    /* last error message            */
+	int error;	    /* sticky error flag             */
+	const s5_codec *bo; /* on-disk byte-order codec      */
 
 	/* block-size profile (derived from opts.bsize) */
-	uint32_t bsize;		/* filesystem block size          */
-	uint32_t inopb;		/* inodes per block (= NIPB)      */
-	uint32_t naddr;		/* di_addr slots (7 or 13)        */
-	uint32_t laddr;		/* naddr-3: direct slots in inode */
-	uint32_t nindir;	/* daddr_t per indirect block     */
-	uint32_t ndirect;	/* directory entries per block    */
-	uint32_t clsize;	/* bsize / 512                    */
+	uint32_t bsize;	  /* filesystem block size          */
+	uint32_t inopb;	  /* inodes per block (= NIPB)      */
+	uint32_t naddr;	  /* di_addr slots (7 or 13)        */
+	uint32_t laddr;	  /* naddr-3: direct slots in inode */
+	uint32_t nindir;  /* daddr_t per indirect block     */
+	uint32_t ndirect; /* directory entries per block    */
+	uint32_t clsize;  /* bsize / 512                    */
 
 	/* decoded superblock */
-	uint32_t s_isize;	/* first data block (= 2 + i-list blocks) */
-	uint32_t s_fsize;	/* total blocks in the volume             */
-	int32_t  s_nfree;
-	int32_t  s_free[P11_NICFREE];
-	int32_t  s_ninode;
+	uint32_t s_isize; /* first data block (= 2 + i-list blocks) */
+	uint32_t s_fsize; /* total blocks in the volume             */
+	int32_t s_nfree;
+	int32_t s_free[P11_NICFREE];
+	int32_t s_ninode;
 	uint16_t s_inode[P11_NICINOD];
-	int32_t  s_tfree;
-	int32_t  s_tinode;
-	int16_t  s_m, s_n;
-	int32_t  s_time;
+	int32_t s_tfree;
+	int32_t s_tinode;
+	int16_t s_m, s_n;
+	int32_t s_time;
 
-	uint32_t ino;		/* last inode number handed out */
-	int      adr[P11_MAXFN];	/* interleave permutation */
+	uint32_t ino;	    /* last inode number handed out */
+	int adr[P11_MAXFN]; /* interleave permutation */
 } S5FS;
 
 /* -------- top level -------- */
@@ -90,7 +90,7 @@ int s5fs_mkfs(S5FS *fs, int fd, uint32_t nblocks, const s5fs_opts *opts);
 
 /* Initialise the handle + superblock geometry, size the i-list, extend the
  * image to full length and zero the i-list.  Leaves an empty free list. */
-int  s5fs_begin(S5FS *fs, int fd, uint32_t nblocks, const s5fs_opts *opts);
+int s5fs_begin(S5FS *fs, int fd, uint32_t nblocks, const s5fs_opts *opts);
 
 /* Build the chained free list over every data block (mkfs's bflist), and
  * write the reserved bad-block inode (P11_BADBLKINO). */
@@ -113,11 +113,11 @@ void s5fs_wtblk(S5FS *fs, uint32_t bno, const uint8_t *buf);
 
 /* Allocate / free one data block via the superblock free list. */
 int32_t s5fs_alloc(S5FS *fs);
-void    s5fs_bfree(S5FS *fs, int32_t bno);
+void s5fs_bfree(S5FS *fs, int32_t bno);
 
 /* Add a directory entry to the in-core block `db`; flushes a full block. */
 void s5fs_entry(S5FS *fs, int *dbc, uint8_t *db, int *ibc, int32_t *ib,
-                uint16_t inum, const char *name);
+		uint16_t inum, const char *name);
 
 /* Flush the current directory/data block `db` and record it in `ib`. */
 void s5fs_newblk(S5FS *fs, int *dbc, uint8_t *db, int *ibc, int32_t *ib);

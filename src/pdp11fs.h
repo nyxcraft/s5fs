@@ -23,6 +23,9 @@
 /* Multi-byte field encodings live in s5endian.h (s5_codec).  This header is
  * pure structure -- no byte order. */
 
+/* clang-format off */	/* the whole file is a field/offset table: the columns are
+			   the documentation, and every value is checked against the
+			   2.9BSD headers by eye, in these columns. */
 /* ------------------------------------------------------------------ *
  * Fixed structural constants (independent of block size)
  * ------------------------------------------------------------------ */
@@ -121,5 +124,7 @@
 /* Free-block list block (struct fblk): count then the addresses. */
 #define P11_FB_NFREE	0				/* short */
 #define P11_FB_FREE	2				/* daddr_t[NICFREE] */
+
+/* clang-format on */
 
 #endif /* PDP11FS_H */

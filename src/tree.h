@@ -23,33 +23,38 @@
 #include <stddef.h>
 #include "s5fs_core.h"
 
-enum { TN_DIR, TN_REG, TN_DEV, TN_LINK };
+enum {
+	TN_DIR,
+	TN_REG,
+	TN_DEV,
+	TN_LINK
+};
 
 typedef struct tnode {
-	char    *name;			/* leaf path component            */
-	int      kind;
-	uint16_t perm;			/* permission bits (07777)        */
-	int16_t  uid, gid;
-	int32_t  atime, mtime, ctime;	/* 0 => stamp now at serialize    */
+	char *name; /* leaf path component            */
+	int kind;
+	uint16_t perm; /* permission bits (07777)        */
+	int16_t uid, gid;
+	int32_t atime, mtime, ctime; /* 0 => stamp now at serialize    */
 
 	/* TN_REG: content streamed from this source at serialize time */
-	int      src_fd;
-	long     src_off;
+	int src_fd;
+	long src_off;
 	uint32_t size;
 
 	/* TN_DEV */
-	int      isblk, major, minor;
+	int isblk, major, minor;
 
 	/* TN_LINK: another name for linkto's inode */
 	struct tnode *linkto;
 
 	/* TN_DIR */
 	struct tnode **kids;
-	size_t   nkids, kidcap;
+	size_t nkids, kidcap;
 
 	/* filled by tree_serialize */
 	uint32_t ino;
-	int16_t  nlink;
+	int16_t nlink;
 	struct tnode *parent;
 } tnode;
 
